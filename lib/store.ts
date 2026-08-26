@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { FileItem, BreadcrumbItem } from "@/lib/types";
+import type { FileItem, BreadcrumbItem, TorBoxAccount } from "@/lib/types";
 
 export type SortKey = "name" | "size" | "date";
 export type SortOrder = "asc" | "desc";
@@ -18,13 +18,15 @@ interface FileStoreState {
   isAddingAccount: boolean;
   error: string | null;
   activeAccountId: number | null;
-  
+
   // UI State
   viewMode: "grid" | "list";
   searchQuery: string;
   sortKey: SortKey;
   sortOrder: SortOrder;
   sidebarCollapsed: boolean;
+  accounts: TorBoxAccount[];
+  setAccounts: (accounts: TorBoxAccount[]) => void;
 
   // Actions
   setActiveAccountId: (accountId: number) => void;
@@ -47,12 +49,14 @@ export const useFileStore = create<FileStoreState>((set, get) => ({
   isAddingAccount: false,
   error: null,
   activeAccountId: null,
-  
+
   viewMode: "grid",
   searchQuery: "",
   sortKey: "name",
   sortOrder: "asc",
   sidebarCollapsed: false,
+  accounts: [],
+  setAccounts: (accounts) => set({ accounts }),
 
   setActiveAccountId: (accountId) => set({ activeAccountId: accountId, currentPath: "/" }),
   setIsAddingAccount: (isAdding) => set({ isAddingAccount: isAdding }),
@@ -66,7 +70,7 @@ export const useFileStore = create<FileStoreState>((set, get) => ({
     const { sortKey, sortOrder } = get();
     const keys: SortKey[] = ["name", "size", "date"];
     const currentIndex = keys.indexOf(sortKey);
-    
+
     if (sortOrder === "desc") {
       set({ sortKey: keys[(currentIndex + 1) % keys.length], sortOrder: "asc" });
     } else {
@@ -91,7 +95,7 @@ export const useFileStore = create<FileStoreState>((set, get) => ({
       const params = new URLSearchParams();
       if (activeAccountId) params.set("account_id", activeAccountId.toString());
       if (forceRefresh) params.set("refresh", "true");
-      
+
       const res = await fetch(`/api/files?${params.toString()}`);
 
       if (res.status === 401) {
@@ -104,7 +108,7 @@ export const useFileStore = create<FileStoreState>((set, get) => ({
       }
 
       const data = await res.json();
-      
+
       const newDirData: DirectoryData = {
         items: data.items,
         breadcrumbs: data.breadcrumbs,
@@ -122,9 +126,9 @@ export const useFileStore = create<FileStoreState>((set, get) => ({
         };
       });
     } catch (err) {
-      set({ 
+      set({
         error: err instanceof Error ? err.message : "Failed to load files",
-        isLoading: false 
+        isLoading: false
       });
     }
   },

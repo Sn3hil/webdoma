@@ -16,10 +16,11 @@ import { useFileStore } from "@/lib/store";
 interface FileBrowserProps {
   playerProtocol: string;
   hasAccounts: boolean;
+  accounts: { id: number; torbox_email: string; is_active: boolean; last_synced_at: string | null }[];
 }
 
-export function FileBrowser({ playerProtocol, hasAccounts }: FileBrowserProps) {
-  const { activeAccountId, isAddingAccount } = useFileStore();
+export function FileBrowser({ playerProtocol, hasAccounts, accounts: accountsProp }: FileBrowserProps) {
+  const { activeAccountId, isAddingAccount, accounts, setAccounts } = useFileStore();
 
   const [activeTab, setActiveTab] = useState<"movies" | "tv" | "other">("movies");
   const [selectedShowTitle, setSelectedShowTitle] = useState<string | null>(null);
@@ -63,6 +64,10 @@ export function FileBrowser({ playerProtocol, hasAccounts }: FileBrowserProps) {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (accountsProp.length > 0) setAccounts(accountsProp);
+  }, [accountsProp, setAccounts]);
 
   // Lightweight refresh when files are inserted inline (no full TorBox API re-sync)
   useEffect(() => {

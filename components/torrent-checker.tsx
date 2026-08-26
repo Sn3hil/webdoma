@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   Magnet,
@@ -95,6 +95,10 @@ export function TorrentChecker({ hasAccounts, accounts = [] }: TorrentCheckerPro
   const [addedHashes, setAddedHashes] = useState<Set<string>>(new Set());
   const [expandedHash, setExpandedHash] = useState<string | null>(null);
 
+  const isCheckingRef = useRef(false);
+  const isAddingRef = useRef(false);
+
+
   const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([]);
 
   useEffect(() => {
@@ -128,7 +132,8 @@ export function TorrentChecker({ hasAccounts, accounts = [] }: TorrentCheckerPro
       toast.error("Please paste a magnet link");
       return;
     }
-
+    if (isCheckingRef.current) return;
+    isCheckingRef.current = true;
     setStep("checking");
 
     try {
@@ -153,21 +158,22 @@ export function TorrentChecker({ hasAccounts, accounts = [] }: TorrentCheckerPro
         params.set("account_id", checkAccountId.toString());
 
         const res = await fetch(`/api/torrent/check-cache?${params}`);
-        if (res.status === 401) {
-          window.location.href = "/login";
+        if (res.status === 401) { window.location.href = "/login"; return; }
+
+        const data = await res.json();
+
+        if (res.status === 409) {
+          toast.error((data as { error?: string }).error || "A cache check is already in progress");
+          setStep("input");
           return;
         }
-        const data = await res.json();
 
         if (!res.ok || !data.success) {
           throw new Error(data.error || data.detail || "Failed to check cache");
         }
 
-        // data.data is Record<hash, info | null>
-        const info = data.data?.[hash] || null;
-        setResults({ [hash]: info });
+        setResults({ [hash]: data.data?.[hash] || null });
       } else {
-        // Bulk mode
         const entries = extractHashes(magnetInput);
         if (entries.length === 0) {
           toast.error("Could not extract any valid magnet links");
@@ -192,23 +198,23 @@ export function TorrentChecker({ hasAccounts, accounts = [] }: TorrentCheckerPro
         const res = await fetch("/api/torrent/check-cache", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            hashes,
-            account_id: checkAccountId,
-          }),
+          body: JSON.stringify({ hashes, account_id: checkAccountId }),
         });
 
-        if (res.status === 401) {
-          window.location.href = "/login";
+        if (res.status === 401) { window.location.href = "/login"; return; }
+
+        const data = await res.json();
+
+        if (res.status === 409) {
+          toast.error((data as { error?: string }).error || "A cache check is already in progress");
+          setStep("input");
           return;
         }
-        const data = await res.json();
 
         if (!res.ok || !data.success) {
           throw new Error(data.error || data.detail || "Failed to check cache");
         }
 
-        // Build results map — any hash not in data.data is not cached
         const resultMap: Record<string, CachedTorrentResult | null> = {};
         for (const hash of hashes) {
           resultMap[hash] = data.data?.[hash] || null;
@@ -221,14 +227,21 @@ export function TorrentChecker({ hasAccounts, accounts = [] }: TorrentCheckerPro
       console.error("Cache check error:", error);
       toast.error(error instanceof Error ? error.message : "Failed to check cache");
       setStep("input");
+    } finally {
+      isCheckingRef.current = false;
     }
   }, [magnetInput, mode, activeAccountId, accounts]);
 
+
   const handleAddTorrent = useCallback(
     async (hash: string) => {
+      if (isAddingRef.current) return;
+      isAddingRef.current = true;
+
       const magnet = magnetMap[hash];
       if (!magnet) {
         toast.error("Magnet link not found for this hash");
+        isAddingRef.current = false;
         return;
       }
 
@@ -240,7 +253,6 @@ export function TorrentChecker({ hasAccounts, accounts = [] }: TorrentCheckerPro
           return;
         }
 
-        // Grab the cached file list from the cache-check results
         const cachedInfo = results[hash];
         const cachedFiles = cachedInfo?.files || [];
 
@@ -257,12 +269,14 @@ export function TorrentChecker({ hasAccounts, accounts = [] }: TorrentCheckerPro
             }),
           });
 
-          if (res.status === 401) {
-            window.location.href = "/login";
-            return;
-          }
+          if (res.status === 401) { window.location.href = "/login"; return; }
 
           const data = await res.json();
+
+          if (res.status === 409) {
+            toast.error((data as { error?: string }).error || "A torrent is already being added");
+            return;
+          }
 
           if (!res.ok || !data.success) {
             throw new Error(data.error || data.detail || `Failed to add torrent to account ${accountId}`);
@@ -278,18 +292,17 @@ export function TorrentChecker({ hasAccounts, accounts = [] }: TorrentCheckerPro
           toast.success("Torrent added to selected accounts!");
         }
 
-        // Lightweight refresh — just re-read from DB, no full TorBox API re-sync
         window.dispatchEvent(new CustomEvent("torrent-files-updated"));
       } catch (error) {
         console.error("Add torrent error:", error);
         toast.error(error instanceof Error ? error.message : "Failed to add torrent");
       } finally {
+        isAddingRef.current = false;
         setAddingHash(null);
       }
     },
     [magnetMap, selectedAccountIds, results]
   );
-
 
   const cachedCount = Object.values(results).filter(Boolean).length;
   const totalCount = Object.keys(results).length;

@@ -34,13 +34,13 @@ function isVideoFile(filename: string, mimetype?: string): boolean {
 // In-memory set to avoid re-fetching season details multiple times in a single sync
 const fetchedSeasonKeys = new Set<string>();
 
-async function searchTmdbMovie(title: string, year?: string) {
+async function searchTmdbMovie(title: string, year?: string, signal?: AbortSignal) {
   if (!TMDB_API_KEY) return null;
 
   const fetchMovie = async (searchYear?: string) => {
     let url = `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(title)}`;
     if (searchYear) url += `&primary_release_year=${searchYear}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal });
     const data = await res.json();
     return data.results?.[0] || null;
   };
@@ -72,13 +72,13 @@ async function searchTmdbMovie(title: string, year?: string) {
   }
 }
 
-async function searchTmdbTv(title: string, year?: string) {
+async function searchTmdbTv(title: string, year?: string, signal?: AbortSignal) {
   if (!TMDB_API_KEY) return null;
 
   const fetchTv = async (searchYear?: string) => {
     let url = `https://api.themoviedb.org/3/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(title)}`;
     if (searchYear) url += `&first_air_date_year=${searchYear}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal });
     const data = await res.json();
     return data.results?.[0] || null;
   };
@@ -110,14 +110,14 @@ async function searchTmdbTv(title: string, year?: string) {
   }
 }
 
-async function fetchAndSaveSeasonEpisodes(showTmdbId: number, seasonNumber: number) {
+async function fetchAndSaveSeasonEpisodes(showTmdbId: number, seasonNumber: number, signal?: AbortSignal) {
   if (!TMDB_API_KEY || seasonNumber <= 0) return;
   const key = `${showTmdbId}-S${seasonNumber}`;
   if (fetchedSeasonKeys.has(key)) return;
 
   try {
     const url = `https://api.themoviedb.org/3/tv/${showTmdbId}/season/${seasonNumber}?api_key=${TMDB_API_KEY}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal });
     if (!res.ok) return;
     const data = await res.json();
 
@@ -165,7 +165,7 @@ export async function processAndInsertFile(
     size: number;
     mimetype?: string;
   },
-  options?: { skipSizeFilter?: boolean }
+  options?: { skipSizeFilter?: boolean; signal?: AbortSignal }
 ): Promise<boolean> {
   const { skipSizeFilter = false } = options || {};
 
@@ -201,7 +201,7 @@ export async function processAndInsertFile(
   let mediaType: "movie" | "tv" | "other" = "other";
 
   if (parsed.mediaType === "tv") {
-    const tvResult = await searchTmdbTv(parsed.title, parsed.year);
+    const tvResult = await searchTmdbTv(parsed.title, parsed.year, options?.signal);
     if (tvResult) {
       const showTmdbId = tvResult.id as number;
       tmdbId = showTmdbId;
@@ -213,7 +213,7 @@ export async function processAndInsertFile(
       upsertMedia(showTmdbId, showTitle, firstAir, posterUrl, "tv", backdropUrl, tvResult.overview);
 
       if (parsed.season !== undefined && parsed.season > 0) {
-        await fetchAndSaveSeasonEpisodes(showTmdbId, parsed.season);
+        await fetchAndSaveSeasonEpisodes(showTmdbId, parsed.season, options?.signal);
       }
       mediaType = "tv";
     } else {
@@ -222,7 +222,7 @@ export async function processAndInsertFile(
     }
   } else {
     // Try TMDB Movie first
-    const movieResult = await searchTmdbMovie(parsed.title, parsed.year);
+    const movieResult = await searchTmdbMovie(parsed.title, parsed.year, options?.signal);
     if (movieResult) {
       const movieTmdbId = movieResult.id as number;
       tmdbId = movieTmdbId;
@@ -247,7 +247,7 @@ export async function processAndInsertFile(
         upsertMedia(showTmdbId, showTitle, firstAir, posterUrl, "tv", backdropUrl, tvResult.overview);
 
         if (parsed.season !== undefined && parsed.season > 0) {
-          await fetchAndSaveSeasonEpisodes(showTmdbId, parsed.season);
+          await fetchAndSaveSeasonEpisodes(showTmdbId, parsed.season, options?.signal);
         }
         mediaType = "tv";
       } else {
@@ -283,21 +283,23 @@ export async function processAndInsertFile(
   return true;
 }
 
-export async function syncAccount(accountId: number): Promise<SyncResult> {
+export async function syncAccount(accountId: number, signal?: AbortSignal): Promise<SyncResult> {
   try {
     // 1. Get a valid access token (auto-refreshes if expired)
     let accessToken: string;
     try {
-      accessToken = await getValidAccessToken(accountId);
+      accessToken = await getValidAccessToken(accountId, signal);
     } catch (e: any) {
+      if (e instanceof DOMException && e.name === "AbortError") throw e;
       return { success: false, filesSynced: 0, error: e.message || "Failed to authenticate" };
     }
 
     // 2. Fetch torrent list from TorBox API
     let torrents;
     try {
-      torrents = await fetchTorrentList(accessToken);
+      torrents = await fetchTorrentList(accessToken, signal);
     } catch (e: any) {
+      if (e instanceof DOMException && e.name === "AbortError") throw e;
       if (e.status === 429) {
         return { success: false, filesSynced: 0, error: "TorBox rate limit exceeded" };
       }

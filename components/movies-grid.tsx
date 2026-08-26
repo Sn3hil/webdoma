@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { LOCAL_DAEMON_PLAYERS } from "@/lib/constants";
 import { launchPlayback } from "@/lib/client-play";
 import { WatchedProgressBar } from "@/components/watched-progress-bar";
+import { AccountBadge } from "@/components/account-badge";
 import { useFileStore } from "@/lib/store";
 import {
   DropdownMenu,
@@ -76,8 +77,10 @@ async function fetchCdnLink(torrentId: number, fileId: number, accountId: number
 }
 
 export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: MoviesGridProps) {
-  const { viewMode } = useFileStore();
+  const { viewMode, accounts } = useFileStore();
   const compactActions = useCompactActions();
+
+  const getAccount = (id: number) => accounts.find(a => a.id === id);
 
   const filtered = movies.filter((m) =>
     (m.title || m.filename).toLowerCase().includes(searchQuery.toLowerCase())
@@ -187,6 +190,11 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
                 {movie.year && <span>{movie.year}</span>}
                 {movie.year && <span className="text-muted-foreground/50">•</span>}
                 <span>{movie.sizeFormatted}</span>
+                
+                {(() => {
+                  const acc = getAccount(movie.account_id);
+                  return acc && <AccountBadge accountId={acc.id} email={acc.torbox_email} variant="inline" />;
+                })()}
               </div>
             </div>
 
@@ -264,9 +272,15 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
                 </h3>
               </div>
 
-              {/* Compact: always-visible three-dots at top-right */}
-              {compactActions && (
-                <div className="absolute top-2 right-2 z-30">
+              {/* Top Right: Account badge & 3-dots menu */}
+              <div className="absolute top-2 right-2 z-30 flex items-center gap-1.5">
+                {(() => {
+                  const acc = getAccount(movie.account_id);
+                  return acc && <AccountBadge accountId={acc.id} email={acc.torbox_email} variant="overlay" />;
+                })()}
+
+                {/* Compact: always-visible three-dots at top-right */}
+                {compactActions && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -297,8 +311,8 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
                       )}
                     </DropdownMenuContent>
                   </DropdownMenu>
-                </div>
-              )}
+                )}
+              </div>
 
               {/* Hover overlay: metadata + action buttons */}
               <div className="absolute inset-0 bg-linear-to-t from-black via-black/85 to-black/60 opacity-0 transition-opacity duration-300 group-hover:opacity-100 flex flex-col justify-end p-2.5 sm:p-4 gap-2 sm:gap-3">

@@ -19,7 +19,7 @@ export default async function HomePage() {
     <div className="flex h-screen overflow-hidden bg-background">
       <Sidebar username={user?.username} />
       <main className="flex-1 overflow-hidden flex flex-col">
-        <FileBrowser playerProtocol={session.playerProtocol || "vlc"} hasAccounts={accounts.length > 0} />
+        <FileBrowser playerProtocol={session.playerProtocol || "vlc"} hasAccounts={accounts.length > 0} accounts={accounts} />
       </main>
       <TorrentChecker hasAccounts={accounts.length > 0} accounts={accounts} />
     </div>

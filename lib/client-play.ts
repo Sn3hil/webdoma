@@ -32,7 +32,9 @@ export async function launchPlayback(params: {
     });
     const data = await res.json();
     if (!res.ok || !data.url) {
-      const message = (data as { error?: string }).error || "Failed to get CDN link";
+      const message = res.status === 409
+        ? (data as { error?: string }).error || "A CDN request is already in progress"
+        : (data as { error?: string }).error || "Failed to get CDN link";
       toast.error(message);
       return { ok: false, error: message };
     }

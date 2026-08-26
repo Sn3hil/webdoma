@@ -4,7 +4,7 @@ import { Copy, Play, Download, Loader2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { LOCAL_DAEMON_PLAYERS } from "@/lib/constants";
 import { launchPlayback } from "@/lib/client-play";
 
@@ -28,6 +28,15 @@ export function FileActions({
   const [isCopying, setIsCopying] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isSyncplaying, setIsSyncplaying] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  /**
+   * Single ref guarding all CDN-link actions on this file-row.
+   * All four handlers (copy, stream, syncplay, download) hit /api/cdn-link,
+   * which the backend protects with a single userId:cdn lock. This ref prevents
+   * two actions from racing before React re-renders to disable the other buttons.
+   */
+  const cdnInFlight = useRef(false);
 
   const getCdnLink = useCallback(async (): Promise<string | null> => {
     try {
@@ -41,13 +50,17 @@ export function FileActions({
         }),
       });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        toast.error((data as { error?: string }).error || "Failed to get CDN link");
+      const data = await res.json();
+
+      if (!res.ok || !data.url) {
+        const message =
+          res.status === 409
+            ? (data as { error?: string }).error || "A CDN request is already in progress"
+            : (data as { error?: string }).error || "Failed to get CDN link";
+        toast.error(message);
         return null;
       }
 
-      const data = await res.json();
       return data.url;
     } catch {
       toast.error("Network error");
@@ -56,16 +69,18 @@ export function FileActions({
   }, [torrentId, fileId, accountId]);
 
   const handleCopyLink = useCallback(async () => {
+    if (cdnInFlight.current) return;
+    cdnInFlight.current = true;
     setIsCopying(true);
     try {
       const cdnUrl = await getCdnLink();
       if (!cdnUrl) return;
-
       await navigator.clipboard.writeText(cdnUrl);
       toast.success("CDN link copied to clipboard");
     } catch {
       toast.error("Failed to copy link");
     } finally {
+      cdnInFlight.current = false;
       setIsCopying(false);
     }
   }, [getCdnLink]);
@@ -75,6 +90,8 @@ export function FileActions({
       toast.error("Syncplay requires a local daemon player (mpv, vlc, iina)");
       return;
     }
+    if (cdnInFlight.current) return;
+    cdnInFlight.current = true;
     setIsSyncplaying(true);
     try {
       const cdnUrl = await getCdnLink();
@@ -104,24 +121,36 @@ export function FileActions({
     } catch {
       toast.error("Failed to start Syncplay");
     } finally {
+      cdnInFlight.current = false;
       setIsSyncplaying(false);
     }
   }, [getCdnLink, playerProtocol]);
 
   const handleStream = useCallback(async () => {
+    if (cdnInFlight.current) return;
+    cdnInFlight.current = true;
     setIsStreaming(true);
     try {
       await launchPlayback({ torrentId, fileId, accountId, playerProtocol });
     } finally {
+      cdnInFlight.current = false;
       setIsStreaming(false);
     }
   }, [torrentId, fileId, accountId, playerProtocol]);
 
   const handleDownload = useCallback(async () => {
-    const cdnUrl = await getCdnLink();
-    if (!cdnUrl) return;
-    window.open(cdnUrl, "_blank");
-    toast.success("Download started", { description: fileName });
+    if (cdnInFlight.current) return;
+    cdnInFlight.current = true;
+    setIsDownloading(true);
+    try {
+      const cdnUrl = await getCdnLink();
+      if (!cdnUrl) return;
+      window.open(cdnUrl, "_blank");
+      toast.success("Download started", { description: fileName });
+    } finally {
+      cdnInFlight.current = false;
+      setIsDownloading(false);
+    }
   }, [getCdnLink, fileName]);
 
   return (
@@ -135,7 +164,7 @@ export function FileActions({
               e.stopPropagation();
               handleCopyLink();
             }}
-            disabled={isCopying}
+            disabled={isCopying || isStreaming || isSyncplaying || isDownloading}
             className="h-8 w-8 hover:bg-primary/10 hover:text-primary"
             id={`copy-link-${fileName}`}
           >
@@ -160,7 +189,7 @@ export function FileActions({
                   e.stopPropagation();
                   handleStream();
                 }}
-                disabled={isStreaming}
+                disabled={isStreaming || isCopying || isSyncplaying || isDownloading}
                 className="h-8 w-8 hover:bg-violet-500/10 hover:text-violet-400"
                 id={`stream-${fileName}`}
               >
@@ -184,7 +213,7 @@ export function FileActions({
                     e.stopPropagation();
                     handleSyncplay();
                   }}
-                  disabled={isSyncplaying}
+                  disabled={isSyncplaying || isCopying || isStreaming || isDownloading}
                   className="h-8 w-8 hover:bg-amber-500/10 hover:text-amber-400"
                   id={`syncplay-${fileName}`}
                 >
@@ -210,10 +239,15 @@ export function FileActions({
               e.stopPropagation();
               handleDownload();
             }}
+            disabled={isDownloading || isCopying || isStreaming || isSyncplaying}
             className="h-8 w-8 hover:bg-emerald-500/10 hover:text-emerald-400"
             id={`download-${fileName}`}
           >
-            <Download size={16} />
+            {isDownloading ? (
+              <Loader2 className="animate-spin" size={16} />
+            ) : (
+              <Download size={16} />
+            )}
           </Button>
         </TooltipTrigger>
         <TooltipContent>Download file</TooltipContent>

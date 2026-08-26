@@ -70,10 +70,14 @@ export interface TorBoxCdnResponse {
 // Retry Helper
 
 async function withRetry<T>(
-  fn: () => Promise<T>,
+  fn: (signal?: AbortSignal) => Promise<T>,
   retries = 3,
-  delay = 1000
+  delay = 1000,
+  signal?: AbortSignal
 ): Promise<T> {
+
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
   try {
     return await fn();
   } catch (error: unknown) {
@@ -87,8 +91,19 @@ async function withRetry<T>(
         `TorBox API 429 rate limit. Retrying in ${delay}ms... (${retries} left)`
       );
       const jitter = Math.random() * 200;
-      await new Promise((resolve) => setTimeout(resolve, delay + jitter));
-      return withRetry(fn, retries - 1, delay * 2);
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, delay + jitter);
+        signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+          },
+          { once: true }
+        );
+      });
+
+      return withRetry(fn, retries - 1, delay * 2, signal);
     }
     throw error;
   }
@@ -99,7 +114,8 @@ async function withRetry<T>(
 // Authenticate with TorBox using email and password.
 export async function authenticateTorBox(
   email: string,
-  password: string
+  password: string,
+  signal?: AbortSignal
 ): Promise<TorBoxAuthResponse> {
   const anonKey = getTbSbAnonKey();
 
@@ -110,6 +126,7 @@ export async function authenticateTorBox(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ email, password }),
+    signal
   });
 
   if (!res.ok) {
@@ -126,7 +143,8 @@ export async function authenticateTorBox(
 
 // Refresh an expired access token using a refresh token.
 export async function refreshTorBoxToken(
-  refreshToken: string
+  refreshToken: string,
+  signal?: AbortSignal
 ): Promise<TorBoxAuthResponse> {
   const anonKey = getTbSbAnonKey();
 
@@ -137,6 +155,7 @@ export async function refreshTorBoxToken(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ refresh_token: refreshToken }),
+    signal
   });
 
   if (!res.ok) {
@@ -162,7 +181,7 @@ export async function refreshTorBoxToken(
  *   4. If refresh fails → re-authenticate with stored credentials
  *   5. Update DB with new tokens in all cases
  */
-export async function getValidAccessToken(accountId: number): Promise<string> {
+export async function getValidAccessToken(accountId: number, signal?: AbortSignal): Promise<string> {
   const account = getAccountById(accountId);
   if (!account) {
     throw new Error("Account not found");
@@ -182,7 +201,7 @@ export async function getValidAccessToken(accountId: number): Promise<string> {
   // Token expired or about to expire — try refresh
   if (account.refresh_token) {
     try {
-      const refreshed = await refreshTorBoxToken(account.refresh_token);
+      const refreshed = await refreshTorBoxToken(account.refresh_token, signal);
       updateAccountTokens(
         accountId,
         refreshed.access_token,
@@ -191,6 +210,7 @@ export async function getValidAccessToken(accountId: number): Promise<string> {
       );
       return refreshed.access_token;
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") throw e;
       console.warn(
         `Token refresh failed for account ${accountId}, falling back to re-auth:`,
         e
@@ -206,7 +226,7 @@ export async function getValidAccessToken(accountId: number): Promise<string> {
     throw new Error("Failed to decrypt stored credentials");
   }
 
-  const authResult = await authenticateTorBox(account.torbox_email, password);
+  const authResult = await authenticateTorBox(account.torbox_email, password, signal);
   updateAccountTokens(
     accountId,
     authResult.access_token,
@@ -218,14 +238,16 @@ export async function getValidAccessToken(accountId: number): Promise<string> {
 
 // Torrent Data 
 export async function fetchTorrentList(
-  accessToken: string
+  accessToken: string,
+  signal?: AbortSignal
 ): Promise<TorBoxTorrent[]> {
-  return withRetry(async () => {
+  return withRetry(async (sig) => {
     const res = await fetch(TORBOX_ENDPOINTS.TORRENTS_MYLIST, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
       cache: "no-store",
+      signal: sig
     });
 
     if (!res.ok) {
@@ -241,16 +263,17 @@ export async function fetchTorrentList(
     }
 
     return body.data || [];
-  });
+  }, 3, 1000, signal);
 }
 
 // CDN Link Generation
 export async function requestCdnLink(
   torrentId: number,
   fileId: number,
-  accessToken: string
+  accessToken: string,
+  signal?: AbortSignal
 ): Promise<string> {
-  return withRetry(async () => {
+  return withRetry(async (sig) => {
     const url = new URL(TORBOX_ENDPOINTS.TORRENTS_REQUEST_DL);
     url.searchParams.set("torrent_id", String(torrentId));
     url.searchParams.set("file_id", String(fileId));
@@ -258,6 +281,7 @@ export async function requestCdnLink(
 
     const res = await fetch(url.toString(), {
       cache: "no-store",
+      signal: sig
     });
 
     if (!res.ok) {
@@ -273,7 +297,7 @@ export async function requestCdnLink(
     }
 
     return body.data;
-  });
+  }, 3, 1000, signal);
 }
 
 // Torrent Cache Check
@@ -304,9 +328,10 @@ export interface CheckCachedResponse {
 /** Check if a single torrent hash is cached on TorBox. */
 export async function checkTorrentCached(
   hash: string,
-  accessToken: string
+  accessToken: string,
+  signal?: AbortSignal
 ): Promise<CheckCachedResponse> {
-  return withRetry(async () => {
+  return withRetry(async (sig) => {
     const url = new URL(TORBOX_ENDPOINTS.TORRENTS_CHECK_CACHED);
     url.searchParams.set("hash", hash);
     url.searchParams.set("format", "object");
@@ -317,6 +342,7 @@ export async function checkTorrentCached(
         Authorization: `Bearer ${accessToken}`,
       },
       cache: "no-store",
+      signal: sig
     });
 
     if (!res.ok) {
@@ -326,15 +352,16 @@ export async function checkTorrentCached(
     }
 
     return res.json();
-  });
+  }, 3, 1000, signal);
 }
 
 /** Check if multiple torrent hashes are cached on TorBox (bulk). */
 export async function checkTorrentsCachedBulk(
   hashes: string[],
-  accessToken: string
+  accessToken: string,
+  signal?: AbortSignal
 ): Promise<CheckCachedResponse> {
-  return withRetry(async () => {
+  return withRetry(async (sig) => {
     const url = new URL(TORBOX_ENDPOINTS.TORRENTS_CHECK_CACHED);
     url.searchParams.set("format", "object");
     url.searchParams.set("list_files", "true");
@@ -346,6 +373,7 @@ export async function checkTorrentsCachedBulk(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ hashes }),
+      signal: sig
     });
 
     if (!res.ok) {
@@ -355,7 +383,7 @@ export async function checkTorrentsCachedBulk(
     }
 
     return res.json();
-  });
+  }, 3, 1000, signal);
 }
 
 // Torrent Creation
@@ -375,9 +403,10 @@ export interface CreateTorrentResponse {
 export async function createTorrent(
   magnetLink: string,
   accessToken: string,
-  addOnlyIfCached: boolean = true
+  addOnlyIfCached: boolean = true,
+  signal?: AbortSignal
 ): Promise<CreateTorrentResponse> {
-  return withRetry(async () => {
+  return withRetry(async (sig) => {
     const formData = new FormData();
     formData.append("magnet", magnetLink);
     if (addOnlyIfCached) {
@@ -390,6 +419,7 @@ export async function createTorrent(
         Authorization: `Bearer ${accessToken}`,
       },
       body: formData,
+      signal: sig
     });
 
     if (!res.ok) {
@@ -399,6 +429,6 @@ export async function createTorrent(
     }
 
     return res.json();
-  });
+  }, 3, 1000, signal);
 }
 

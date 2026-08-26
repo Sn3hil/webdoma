@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { launchPlayback } from "@/lib/client-play";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useFileStore } from "@/lib/store";
+import { AccountBadge } from "@/components/account-badge";
 import { WatchedProgressBar } from "@/components/watched-progress-bar";
 import {
   DropdownMenu,
@@ -89,8 +90,10 @@ async function fetchCdnLink(torrentId: number, fileId: number, accountId: number
 }
 
 export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetailProps) {
-  const { viewMode } = useFileStore();
+  const { viewMode, accounts } = useFileStore();
   const compactActions = useCompactActions();
+  
+  const getAccount = (id: number) => accounts.find(a => a.id === id);
   const [showInfo, setShowInfo] = useState<ShowInfo | null>(null);
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<number>(1);
@@ -313,6 +316,11 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
                     <span className="font-semibold text-foreground/80">S{String(ep.season_number).padStart(2, "0")}E{String(ep.episode_number).padStart(2, "0")}</span>
                     <span className="text-muted-foreground/50">•</span>
                     <span>{ep.sizeFormatted}</span>
+
+                    {(() => {
+                      const acc = getAccount(ep.account_id);
+                      return acc && <AccountBadge accountId={acc.id} email={acc.torbox_email} variant="inline" />;
+                    })()}
                   </div>
                 </div>
 
@@ -393,9 +401,17 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
                       {ep.sizeFormatted}
                     </span>
 
-                    {/* Compact: always-visible three-dots at top-right */}
-                    {compactActions && (
-                      <div className="absolute top-2 right-2 z-30">
+                    {/* Account badge is moved to top right */}
+
+                    {/* Top Right: Account badge & 3-dots menu */}
+                    <div className="absolute top-2 right-2 z-30 flex items-center gap-1.5">
+                      {(() => {
+                        const acc = getAccount(ep.account_id);
+                        return acc && <AccountBadge accountId={acc.id} email={acc.torbox_email} variant="overlay" />;
+                      })()}
+
+                      {/* Compact: always-visible three-dots at top-right */}
+                      {compactActions && (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
@@ -426,8 +442,8 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
 
                   <div className="p-4 space-y-1.5 flex-1">

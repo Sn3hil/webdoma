@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { buildPlayerURL } from "@/lib/players";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useState } from "react";
+import { AccountBadge } from "@/components/account-badge";
+import { useFileStore } from "@/lib/store";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -63,6 +65,9 @@ async function fetchCdnLink(torrentId: number, fileId: number, accountId: number
 
 export function OtherFilesView({ files, isLoading, searchQuery, playerProtocol }: OtherFilesViewProps) {
   const narrow = useNarrow(640);
+  const { accounts } = useFileStore();
+
+  const getAccount = (id: number) => accounts.find(a => a.id === id);
 
   const filtered = files.filter((f) =>
     f.filename.toLowerCase().includes(searchQuery.toLowerCase())
@@ -188,9 +193,13 @@ export function OtherFilesView({ files, isLoading, searchQuery, playerProtocol }
               <p className="text-sm font-semibold tracking-tight text-foreground truncate">
                 {file.filename}
               </p>
-              <p className="text-xs text-muted-foreground">
-                {file.sizeFormatted} • {file.mime_type}
-              </p>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                <span>{file.sizeFormatted} • {file.mime_type}</span>
+                {(() => {
+                  const acc = getAccount(file.account_id);
+                  return acc && <AccountBadge accountId={acc.id} email={acc.torbox_email} variant="inline" />;
+                })()}
+              </div>
             </div>
           </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -45,10 +45,14 @@ export default function AccountsPage() {
     fetchAccounts();
   }, []);
 
+  const isSyncingRef = useRef(false);
+
   const handleSyncAccount = async () => {
     if (syncConfirmAccountId === null) return;
+    if (isSyncingRef.current) return;
+    isSyncingRef.current = true;
+
     const accountId = syncConfirmAccountId;
-    
     setSyncConfirmAccountId(null);
     setIsSyncing(accountId);
     try {
@@ -60,6 +64,11 @@ export default function AccountsPage() {
 
       const data = await res.json();
 
+      if (res.status === 409) {
+        toast.error((data as { error?: string }).error || "A sync is already in progress");
+        return;
+      }
+
       if (!res.ok) {
         throw new Error(data.error || "Sync failed");
       }
@@ -69,13 +78,14 @@ export default function AccountsPage() {
     } catch (error) {
       toast.error("Failed to sync account");
     } finally {
+      isSyncingRef.current = false;
       setIsSyncing(null);
     }
   };
 
   const handleDeleteAccount = async (accountId: number) => {
     if (!confirm("Are you sure you want to delete this account? Your downloaded media metadata for this account will be removed.")) return;
-    
+
     setIsDeleting(accountId);
     try {
       const res = await fetch(`/api/accounts?account_id=${accountId}`, {
@@ -145,7 +155,7 @@ export default function AccountsPage() {
                           </p>
                         </div>
                       </div>
-                      
+
                       <div className="flex items-center gap-2 shrink-0">
                         <Button
                           variant="outline"
@@ -183,11 +193,11 @@ export default function AccountsPage() {
             </CardContent>
           </Card>
         </div>
-        
-        <AddAccountForm 
-          open={isAddAccountOpen} 
-          onOpenChange={setIsAddAccountOpen} 
-          onSuccess={handleAddSuccess} 
+
+        <AddAccountForm
+          open={isAddAccountOpen}
+          onOpenChange={setIsAddAccountOpen}
+          onSuccess={handleAddSuccess}
         />
 
         <Dialog open={syncConfirmAccountId !== null} onOpenChange={(open) => !open && setSyncConfirmAccountId(null)}>

@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import { verifyUserAccountAccess } from "@/lib/db";
 import { getValidAccessToken, requestCdnLink } from "@/lib/torbox";
 import { mintPlayToken } from "@/lib/crypto";
+import { acquireLock, releaseLock } from "@/lib/in-flight";
 
 const cdnLinkSchema = z.object({
   torrent_id: z.number().int().nonnegative(),
@@ -41,38 +42,48 @@ export async function POST(request: Request) {
       );
     }
 
-    // Get a valid access token (auto-refreshes if expired)
-    let accessToken: string;
-    try {
-      accessToken = await getValidAccessToken(account_id);
-    } catch (e: any) {
-      return NextResponse.json(
-        { error: e.message || "Failed to authenticate with TorBox" },
-        { status: 502 }
-      );
+    const lockKey = `${session.userId}:cdn`;
+    const controller = acquireLock(lockKey);
+    if (!controller) {
+      return NextResponse.json({ error: "A CDN link request is already in progress" }, { status: 409 });
     }
 
-    // Request CDN download link
-    let cdnUrl: string;
     try {
-      cdnUrl = await requestCdnLink(torrent_id, file_id, accessToken);
-    } catch (e: any) {
-      return NextResponse.json(
-        { error: e.message || "Failed to generate CDN link" },
-        { status: 502 }
-      );
+      // Get a valid access token (auto-refreshes if expired)
+      let accessToken: string;
+      try {
+        accessToken = await getValidAccessToken(account_id, controller.signal);
+      } catch (e: any) {
+        return NextResponse.json(
+          { error: e.message || "Failed to authenticate with TorBox" },
+          { status: 502 }
+        );
+      }
+
+      // Request CDN download link
+      let cdnUrl: string;
+      try {
+        cdnUrl = await requestCdnLink(torrent_id, file_id, accessToken, controller.signal);
+      } catch (e: any) {
+        return NextResponse.json(
+          { error: e.message || "Failed to generate CDN link" },
+          { status: 502 }
+        );
+      }
+
+      // Mint a short-lived HMAC token so the local daemon can report playback
+      // progress back to /api/progress (runs after ownership was verified above).
+      const playToken = mintPlayToken({
+        userId: session.userId,
+        accountId: account_id,
+        torrentId: torrent_id,
+        fileId: file_id,
+      });
+
+      return NextResponse.json({ success: true, url: cdnUrl, playToken });
+    } finally {
+      releaseLock(lockKey, controller);
     }
-
-    // Mint a short-lived HMAC token so the local daemon can report playback
-    // progress back to /api/progress (runs after ownership was verified above).
-    const playToken = mintPlayToken({
-      userId: session.userId,
-      accountId: account_id,
-      torrentId: torrent_id,
-      fileId: file_id,
-    });
-
-    return NextResponse.json({ success: true, url: cdnUrl, playToken });
   } catch (error) {
     console.error("CDN link error:", error);
     return NextResponse.json(
