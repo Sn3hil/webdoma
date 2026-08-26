@@ -25,7 +25,7 @@ There are currently only three official ways to run Relay.
 
 **Note: There is no Docker implementation available to run this application at this time.**
 
-To utilize local playback features in any of the setups below, you must download and run the Aemond local daemon on your host machine. You can find the daemon repository here: [Sn3hil/relay-aemond](https://github.com/Sn3hil/relay-aemond)
+To utilize local playback features in any of the setups below, you must download and run the Aemond local daemon on your host machine. You can find the daemon repository here: [Sn3hil/relay-aemond](https://github.com/Sn3hil/webdoma-aemond)
 
 ### 1. Hosted Instance with Local Daemon
 
