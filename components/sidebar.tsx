@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { FolderOpen, Settings, LogOut, Loader2, Users, ChevronLeft, ChevronRight, TextAlignJustify, LayoutGrid, List } from "lucide-react";
+import { FolderOpen, Settings, LogOut, Loader2, Users, ChevronLeft, ChevronRight, TextAlignJustify, LayoutGrid, List, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -59,6 +59,7 @@ export function Sidebar({ username = "User" }: SidebarProps) {
 
   const navItems = [
     { href: "/", label: "Browse", icon: FolderOpen },
+    { href: "/search", label: "Search", icon: Search },
     { href: "/accounts", label: "Accounts", icon: Users },
     { href: "/settings", label: "Settings", icon: Settings },
   ];

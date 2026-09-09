@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { Sidebar } from "@/components/sidebar";
 import { FileBrowser } from "@/components/file-browser";
-import { TorrentChecker } from "@/components/torrent-checker";
+
 import { getAccountsByUserId, getUserById } from "@/lib/db";
 
 export default async function HomePage() {
@@ -21,7 +21,7 @@ export default async function HomePage() {
       <main className="flex-1 overflow-hidden flex flex-col">
         <FileBrowser playerProtocol={session.playerProtocol || "vlc"} hasAccounts={accounts.length > 0} accounts={accounts} />
       </main>
-      <TorrentChecker hasAccounts={accounts.length > 0} accounts={accounts} />
+
     </div>
   );
 }
