@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   Search,
   HardDrive,
@@ -82,6 +82,26 @@ export function SearchView({ accounts, hasAccounts, availableSources = [] }: Sea
   const [searchStatus, setSearchStatus] = useState<SearchStatus>("idle");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searchErrors, setSearchErrors] = useState<{ sourceId: string; error: string }[]>([]);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const [completedSources, setCompletedSources] = useState(0);
+  const [totalSources, setTotalSources] = useState(0);
+
+  const handleCancelSearch = async () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setSearchStatus("results");
+    try {
+      await fetch("/api/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "search" }),
+      });
+    } catch (e) {
+      // ignore
+    }
+  };
 
   // Source selection
   const [enabledSources, setEnabledSources] = useState<string[]>([]);
@@ -144,27 +164,93 @@ export function SearchView({ accounts, hasAccounts, availableSources = [] }: Sea
 
   const handleSearch = async () => {
     if (!query.trim() || isMagnet) return;
+    
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setSearchStatus("searching");
     setCacheStatuses(new Map());
     setCacheResults(new Map());
     setAddedHashes(new Set());
+    setResults([]);
+    setSearchErrors([]);
+    setCompletedSources(0);
+    setTotalSources(sourcesLoaded && enabledSources.length > 0 ? enabledSources.length : availableSources.length);
 
     try {
       let url = `/api/search?q=${encodeURIComponent(query.trim())}`;
       if (sourcesLoaded) {
         url += `&sources=${enabledSources.join(",")}`;
       }
-      const res = await fetch(url);
+      
+      const res = await fetch(url, { signal: controller.signal });
       if (res.status === 401) { window.location.href = "/login"; return; }
       if (!res.ok) throw new Error("Search failed");
+      if (!res.body) throw new Error("No response body");
 
-      const data = await res.json();
-      setResults(data.results || []);
-      setSearchErrors(data.errors || []);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const resultsMap = new Map<string, SearchResult>();
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || ""; 
+
+        for (const block of lines) {
+          if (!block.trim()) continue;
+          
+          const eventMatch = block.match(/event: (.*)\n/);
+          const dataMatch = block.match(/data: (.*)/);
+          
+          if (eventMatch && dataMatch) {
+            const eventType = eventMatch[1].trim();
+            const dataStr = dataMatch[1].trim();
+            const data = JSON.parse(dataStr);
+            
+            if (eventType === "source") {
+              if (data.error) {
+                setSearchErrors(prev => [...prev, { sourceId: data.sourceId, error: data.error }]);
+              } else if (data.results && Array.isArray(data.results)) {
+                let updated = false;
+                for (const item of data.results) {
+                  const existing = resultsMap.get(item.infoHash);
+                  if (!existing || item.seeders > existing.seeders) {
+                    resultsMap.set(item.infoHash, item);
+                    updated = true;
+                  }
+                }
+                if (updated) {
+                  const newResults = Array.from(resultsMap.values()).sort((a, b) => b.seeders - a.seeders);
+                  setResults(newResults);
+                }
+              }
+              setCompletedSources(prev => prev + 1);
+            } else if (eventType === "done") {
+               // Done
+            }
+          }
+        }
+      }
+      
       setSearchStatus("results");
-    } catch (error) {
+    } catch (error: any) {
+      if (error.name === "AbortError") {
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Search failed");
       setSearchStatus("error");
+    } finally {
+      if (abortControllerRef.current === controller) {
+         abortControllerRef.current = null;
+      }
     }
   };
 
@@ -395,10 +481,78 @@ export function SearchView({ accounts, hasAccounts, availableSources = [] }: Sea
         </div>
       )}
 
-      {/* Loading state */}
+      {/* Loading & Streaming state */}
       {searchStatus === "searching" && (
-        <div className="flex-1 flex items-center justify-center">
-          <Loader2 size={32} className="animate-spin text-primary" />
+        <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col">
+          <div className="flex items-center justify-between bg-muted/30 border border-border/50 rounded-2xl p-4 mb-4">
+            <div className="flex items-center gap-3">
+              <Loader2 size={20} className="animate-spin text-primary" />
+              <div>
+                <p className="text-sm font-medium">Searching Sources...</p>
+                <p className="text-xs text-muted-foreground">
+                  {completedSources} / {totalSources} completed
+                </p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" onClick={handleCancelSearch} className="gap-1.5 border-red-500/20 text-red-500 hover:bg-red-500/10">
+              <XCircle size={14} /> Cancel
+            </Button>
+          </div>
+          
+          {/* Show partial results while searching */}
+          {results.length > 0 && (
+            <div className="max-w-3xl mx-auto space-y-4 w-full">
+              <div className="text-sm font-medium text-muted-foreground mb-4">
+                Found {results.length} result{results.length !== 1 ? "s" : ""} so far...
+              </div>
+              {results.map((result) => {
+                const status = cacheStatuses.get(result.infoHash) ?? "idle";
+                return (
+                  <div
+                    key={result.infoHash}
+                    className="flex items-center gap-4 p-4 border-b border-border/30"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold whitespace-normal break-words leading-snug">
+                        {result.name}
+                      </p>
+                      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-muted-foreground">
+                        <span>{result.source}</span>
+                        {result.sizeBytes > 0 && (
+                          <span>{formatBytes(result.sizeBytes)}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      {status === "idle" && (
+                        <Button variant="outline" size="sm" onClick={() => handleCheckCache(result)}>
+                          Check Cache
+                        </Button>
+                      )}
+                      {status === "checking" && (
+                        <Loader2 size={16} className="animate-spin text-muted-foreground" />
+                      )}
+                      {status === "not-cached" && (
+                        <span className="flex items-center gap-1 text-xs text-red-400">
+                          <XCircle size={14} /> Not cached
+                        </span>
+                      )}
+                      {status === "cached" && !addedHashes.has(result.infoHash) && (
+                        <Button size="sm" onClick={() => handleAddClick(result)} className="gap-1">
+                          <Plus size={13} /> Add
+                        </Button>
+                      )}
+                      {addedHashes.has(result.infoHash) && (
+                        <span className="flex items-center gap-1 text-xs text-emerald-500">
+                          <CheckCircle2 size={14} /> Added
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -414,7 +568,7 @@ export function SearchView({ accounts, hasAccounts, availableSources = [] }: Sea
               </div>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto space-y-4">
+            <div className="max-w-3xl mx-auto">
               <div className="text-sm font-medium text-muted-foreground mb-4">
                 Found {results.length} result{results.length !== 1 ? "s" : ""}
               </div>
@@ -424,7 +578,7 @@ export function SearchView({ accounts, hasAccounts, availableSources = [] }: Sea
                 return (
                   <div
                     key={result.infoHash}
-                    className="flex items-center gap-4 p-4 rounded-2xl border border-border/50 bg-card/50 hover:bg-muted/20 transition-all shadow-sm"
+                    className="flex items-center gap-4 p-4 border-b border-border/30"
                   >
                     {/* Info */}
                     <div className="flex-1 min-w-0">

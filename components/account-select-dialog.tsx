@@ -35,14 +35,12 @@ export function AccountSelectDialog({
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [isAdding, setIsAdding] = useState(false);
 
-  // Pre-select active account on open
+  // Empty selection on open
   useEffect(() => {
-    if (open && activeAccountId) {
-      setSelectedIds([activeAccountId]);
-    } else if (open && accounts.length > 0) {
-      setSelectedIds([accounts[0].id]);
+    if (open) {
+      setSelectedIds([]);
     }
-  }, [open, activeAccountId, accounts]);
+  }, [open]);
 
   const toggleAccount = (id: number) => {
     setSelectedIds((prev) =>

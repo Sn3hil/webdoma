@@ -8,6 +8,7 @@ export const SEASON_EPISODE_RE = /S(\d{1,2})E(\d{1,3})((?:[-._]?E\d{1,3})*)/i;
 export const EXTRA_EPISODE_RE = /E(\d{1,3})/gi;
 export const X_FORMAT_RE = /(?<![A-Za-z0-9])(\d{1,2})x(\d{2,3})(?![A-Za-z0-9])/;
 export const SEASON_ONLY_RE = /(?<![A-Za-z0-9])S(\d{1,2})(?!\d)(?!E)/i;
+export const EPISODE_ONLY_RE = /(?<![A-Za-z0-9])E(\d{1,3})(?![A-Za-z0-9])/i;
 export const YEAR_RE = /\b(19\d{2}|20\d{2})\b/g;
 
 export interface ParsedMedia {
@@ -72,6 +73,17 @@ function detectSeasonEpisode(base: string): Detection | null {
       season: parseInt(sMatch[1], 10),
       episodes: [],
       matchIndex: sMatch.index,
+    };
+  }
+
+  // Episode-only marker, e.g. "Show.E01.mkv" or "The.Blue.Planet.E01.The.Blue.Planet.1080p.BluRay.Remux.mkv"
+  // Assumes season 1 when only an episode number is present without a season prefix.
+  const epMatch = EPISODE_ONLY_RE.exec(base);
+  if (epMatch) {
+    return {
+      season: 1,
+      episodes: [parseInt(epMatch[1], 10)],
+      matchIndex: epMatch.index,
     };
   }
 

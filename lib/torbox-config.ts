@@ -32,6 +32,13 @@ export const TOKEN_REFRESH_BUFFER_S = 60;
 /**
  * Minimum file size in bytes to include during sync.
  * Files smaller than this are skipped (typically non-media files).
- * Default: 250 MB
+ * Default: 500 MB
  */
-export const MIN_FILE_SIZE_BYTES = 250 * 1024 * 1024;
+export const MIN_FILE_SIZE_BYTES = 500 * 1024 * 1024;
+
+/**
+ * Minimum size for files with "sample" in the name.
+ * Sample files below this size are skipped to avoid polluting the database.
+ * Default: 1 GB
+ */
+export const MIN_SAMPLE_FILE_SIZE_BYTES = 1024 * 1024 * 1024;

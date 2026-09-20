@@ -7,7 +7,8 @@ const CANCELLABLE_ACTIONS = [
     "sync",
     "cdn",
     "torrent:create",
-    "torrent:check-cache"
+    "torrent:check-cache",
+    "search"
 ] as const;
 
 const cancelSchema = z.object({

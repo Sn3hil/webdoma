@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { SOURCES } from "@/tor_sources/registry";
 import { cachedSearch } from "@/tor_sources/cache";
 import type { TorrentResult } from "@/tor_sources/types";
+import { acquireLock, releaseLock, abortLock } from "@/lib/in-flight";
 
 export const dynamic = "force-dynamic";
 
@@ -33,64 +34,97 @@ export async function GET(request: Request) {
       return NextResponse.json({ results: [], errors: [] });
     }
 
-    // 15-second timeout for the entire search
-    const controller = new AbortController();
+    const lockKey = `${session.userId}:search`;
+    abortLock(lockKey); // Cancel any previous running search
+    const controller = acquireLock(lockKey);
+    
+    if (!controller) {
+      return NextResponse.json({ error: "Could not acquire search lock" }, { status: 409 });
+    }
+
     const timeout = setTimeout(() => controller.abort(), 15_000);
 
-    try {
-      // Search all sources in parallel; partial failures don't block others
-      const settled = await Promise.allSettled(
-        activeSources.map((source) =>
-          cachedSearch(source, query.trim(), { signal: controller.signal })
-        )
-      );
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controllerStream) {
+        const sendEvent = (event: string, data: any) => {
+          try {
+            controllerStream.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+          } catch (e) {
+            // Stream might be closed
+          }
+        };
 
-      // Deduplicate by infoHash — keep the result with more seeders
-      const resultsByHash = new Map<string, SearchResult>();
-      const errors: { sourceId: string; error: string }[] = [];
-      const queryTokens = query.trim().toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+        const queryTokens = query.trim().toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 
-      for (let i = 0; i < settled.length; i++) {
-        const outcome = settled[i]!;
-        const source = activeSources[i]!;
-        if (outcome.status === "fulfilled") {
-          for (const result of outcome.value) {
-            // Global fuzzy filter: require all query words to be present in the result name
-            if (queryTokens.length > 0) {
-              const nameLower = result.name.toLowerCase().replace(/[^a-z0-9]+/g, " ");
-              const matches = queryTokens.every(token => nameLower.includes(token));
-              if (!matches) continue;
-            }
+        try {
+          const promises = activeSources.map(async (source) => {
+            try {
+              const rawResults = await cachedSearch(source, query.trim(), { signal: controller.signal });
+              
+              const resultsByHash = new Map<string, SearchResult>();
 
-            const existing = resultsByHash.get(result.infoHash);
-            if (!existing || result.seeders > existing.seeders) {
-              resultsByHash.set(result.infoHash, {
-                ...result,
-                reportsHealth: source.reportsHealth,
+              for (const result of rawResults) {
+                if (queryTokens.length > 0) {
+                  const nameLower = result.name.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+                  const matches = queryTokens.every(token => nameLower.includes(token));
+                  if (!matches) continue;
+                }
+
+                const existing = resultsByHash.get(result.infoHash);
+                if (!existing || result.seeders > existing.seeders) {
+                  resultsByHash.set(result.infoHash, {
+                    ...result,
+                    reportsHealth: source.reportsHealth,
+                  });
+                }
+              }
+
+              sendEvent("source", {
+                sourceId: source.id,
+                results: Array.from(resultsByHash.values()),
+                error: null
+              });
+            } catch (error) {
+              if (error instanceof DOMException && error.name === "AbortError") {
+                return; // Silently ignore aborts
+              }
+              sendEvent("source", {
+                sourceId: source.id,
+                results: [],
+                error: error instanceof Error ? error.message : "Unknown error"
               });
             }
-          }
-        } else {
-          errors.push({
-            sourceId: source.id,
-            error: outcome.reason instanceof Error
-              ? outcome.reason.message
-              : "Unknown error",
           });
+
+          await Promise.allSettled(promises);
+          
+          sendEvent("done", { totalSources: activeSources.length });
+        } finally {
+          clearTimeout(timeout);
+          releaseLock(lockKey, controller);
+          try {
+            controllerStream.close();
+          } catch (e) {}
         }
+      },
+      cancel() {
+        clearTimeout(timeout);
+        controller.abort();
+        releaseLock(lockKey, controller);
       }
+    });
 
-      // Sort by seeders descending for a useful default order
-      const results = Array.from(resultsByHash.values()).sort(
-        (a, b) => b.seeders - a.seeders
-      );
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+      },
+    });
 
-      return NextResponse.json({ results, errors });
-    } finally {
-      clearTimeout(timeout);
-    }
   } catch (error) {
-    console.error("Search error:", error);
+    console.error("Search API setup error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Search failed" },
       { status: 500 }
