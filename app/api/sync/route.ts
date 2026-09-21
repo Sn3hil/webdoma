@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import { syncAccount } from "@/lib/sync";
 import { getAccountById, verifyUserAccountAccess } from "@/lib/db";
 import { acquireLock, releaseLock } from "@/lib/in-flight";
+import { cleanupOrphanedThumbnailsFromDisk } from "@/lib/thumbnails";
 
 const syncSchema = z.object({
   account_id: z.number().int().positive(),
@@ -45,6 +46,9 @@ export async function POST(request: Request) {
           { status: 500 }
         );
       }
+
+      // Clean up orphaned thumbnails for files no longer in remote_list_cache
+      await cleanupOrphanedThumbnailsFromDisk();
 
       return NextResponse.json({ success: true, files_synced: result.filesSynced });
     } finally {

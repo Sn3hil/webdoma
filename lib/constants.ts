@@ -74,7 +74,13 @@ export const PLAYERS: PlayerConfig[] = [
 
 // Defaults
 
-export const DEFAULT_PLAYER_PROTOCOL = "vlc";
+export const DEFAULT_PLAYER_PROTOCOL = "mpv";
+
+// Thumbnail Generation
+
+export const THUMBNAIL_WIDTH = 480;
+export const THUMBNAIL_COUNT = 5;
+export const THUMBNAIL_QUALITY = 2; // ffmpeg -q:v (lower = better, 2 is high quality)
 
 // Players that support local client-side daemon launch (Aemond)
 export const LOCAL_DAEMON_PLAYERS = ["mpv", "vlc", "iina"];
