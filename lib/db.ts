@@ -190,6 +190,30 @@ try {
       )
       .run();
 
+    // file_thumbnails (video thumbnail previews for "other" files)
+    globalForDb.__domaDb
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS file_thumbnails (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        torrent_id  INTEGER NOT NULL,
+        file_id     INTEGER NOT NULL,
+        position    INTEGER NOT NULL CHECK(position BETWEEN 1 AND 5),
+        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(account_id, torrent_id, file_id, position)
+      )
+    `
+      )
+      .run();
+
+    globalForDb.__domaDb
+      .query(
+        `CREATE INDEX IF NOT EXISTS idx_file_thumbnails_lookup
+         ON file_thumbnails(account_id, torrent_id, file_id)`
+      )
+      .run();
+
     // Safe column additions for existing databases (idempotent)
     try { globalForDb.__domaDb.query("ALTER TABLE media ADD COLUMN backdrop_url TEXT").run(); } catch (_) { }
     try { globalForDb.__domaDb.query("ALTER TABLE media ADD COLUMN overview TEXT").run(); } catch (_) { }
@@ -1190,5 +1214,99 @@ export function setMetadata(filename: string, title: string, year: string, poste
     ).run(filename, title, year, posterUrl);
   } catch (error) {
     console.error("Failed to set metadata:", error);
+  }
+}
+
+// ── file_thumbnails ──────────────────────────────────────────────────────────
+
+export function getFilesNeedingThumbnails(accountId: number) {
+  if (!db) return [];
+  try {
+    return db
+      .query(
+        `SELECT r.account_id, r.torrent_id, r.file_id, r.remote_path, r.filename
+         FROM remote_list_cache r
+         WHERE r.account_id = ? AND (r.media_type = 'other' OR r.media_type IS NULL)
+         AND (
+           SELECT COUNT(*) FROM file_thumbnails ft
+           WHERE ft.account_id = r.account_id
+             AND ft.torrent_id = r.torrent_id
+             AND ft.file_id = r.file_id
+         ) < 5
+         ORDER BY r.filename ASC`
+      )
+      .all(accountId) as any[];
+  } catch (e) {
+    console.error("getFilesNeedingThumbnails error:", e);
+    return [];
+  }
+}
+
+export function getThumbnailCount(accountId: number, torrentId: number, fileId: number): number {
+  if (!db) return 0;
+  try {
+    const row = db
+      .query(
+        `SELECT COUNT(*) as cnt FROM file_thumbnails
+         WHERE account_id = ? AND torrent_id = ? AND file_id = ?`
+      )
+      .get(accountId, torrentId, fileId) as any;
+    return row?.cnt ?? 0;
+  } catch (e) {
+    console.error("getThumbnailCount error:", e);
+    return 0;
+  }
+}
+
+export function insertThumbnail(accountId: number, torrentId: number, fileId: number, position: number) {
+  if (!db) return;
+  try {
+    db.query(
+      `INSERT OR IGNORE INTO file_thumbnails (account_id, torrent_id, file_id, position)
+       VALUES (?, ?, ?, ?)`
+    ).run(accountId, torrentId, fileId, position);
+  } catch (e) {
+    console.error("insertThumbnail error:", e);
+  }
+}
+
+export function getThumbnailsForFile(accountId: number, torrentId: number, fileId: number) {
+  if (!db) return [];
+  try {
+    return db
+      .query(
+        `SELECT position FROM file_thumbnails
+         WHERE account_id = ? AND torrent_id = ? AND file_id = ?
+         ORDER BY position ASC`
+      )
+      .all(accountId, torrentId, fileId) as any[];
+  } catch (e) {
+    console.error("getThumbnailsForFile error:", e);
+    return [];
+  }
+}
+
+export function deleteThumbnailsForAccount(accountId: number) {
+  if (!db) return;
+  try {
+    db.query("DELETE FROM file_thumbnails WHERE account_id = ?").run(accountId);
+  } catch (e) {
+    console.error("deleteThumbnailsForAccount error:", e);
+  }
+}
+
+export function deleteOrphanedThumbnails() {
+  if (!db) return;
+  try {
+    db.query(
+      `DELETE FROM file_thumbnails WHERE NOT EXISTS (
+        SELECT 1 FROM remote_list_cache r
+        WHERE r.account_id = file_thumbnails.account_id
+          AND r.torrent_id = file_thumbnails.torrent_id
+          AND r.file_id = file_thumbnails.file_id
+      )`
+    ).run();
+  } catch (e) {
+    console.error("deleteOrphanedThumbnails error:", e);
   }
 }

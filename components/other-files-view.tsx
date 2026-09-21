@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Play, Download, Copy, FolderOpen, Users, MoreVertical } from "lucide-react";
+import { FileText, Play, Download, Copy, FolderOpen, Users, MoreVertical, Loader2, ChevronLeft, ChevronRight, Images, FileVideo } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -63,29 +63,31 @@ async function fetchCdnLink(torrentId: number, fileId: number, accountId: number
   }
 }
 
-export function OtherFilesView({ files, isLoading, searchQuery, playerProtocol }: OtherFilesViewProps) {
-  const narrow = useNarrow(640);
-  const { accounts } = useFileStore();
+function FileCard({ file, playerProtocol, accounts, compactActions }: { file: OtherFile, playerProtocol: string, accounts: any[], compactActions: boolean }) {
+  const [currentPos, setCurrentPos] = useState(1);
+  const [thumbAvailable, setThumbAvailable] = useState<boolean | null>(null);
 
-  const getAccount = (id: number) => accounts.find(a => a.id === id);
+  useEffect(() => {
+    fetch(`/api/thumbnails/${file.account_id}/${file.torrent_id}/${file.file_id}/1`, { method: "HEAD" })
+      .then((res) => setThumbAvailable(res.ok))
+      .catch(() => setThumbAvailable(false));
+  }, [file.account_id, file.torrent_id, file.file_id]);
 
-  const filtered = files.filter((f) =>
-    f.filename.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const thumbUrl = `/api/thumbnails/${file.account_id}/${file.torrent_id}/${file.file_id}/${currentPos}`;
+  const account = accounts.find(a => a.id === file.account_id);
 
-  const handleCopyLink = useCallback(async (file: OtherFile) => {
+  const handleCopyLink = async () => {
     const cdnUrl = await fetchCdnLink(file.torrent_id, file.file_id, file.account_id);
     if (!cdnUrl) return;
-
     try {
       await navigator.clipboard.writeText(cdnUrl);
       toast.success("Link copied");
     } catch {
       toast.error("Failed to copy link");
     }
-  }, []);
+  };
 
-  const handleStream = useCallback(async (file: OtherFile) => {
+  const handleStream = async () => {
     const cdnUrl = await fetchCdnLink(file.torrent_id, file.file_id, file.account_id);
     if (!cdnUrl) return;
 
@@ -96,7 +98,6 @@ export function OtherFilesView({ files, isLoading, searchQuery, playerProtocol }
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ player: playerProtocol, url: cdnUrl }),
         });
-
         if (daemonRes.ok) {
           toast.success(`Launched ${playerProtocol.toUpperCase()} via Local Daemon`, {
             description: "CDN stream active."
@@ -122,16 +123,16 @@ export function OtherFilesView({ files, isLoading, searchQuery, playerProtocol }
     toast.success(`Opening in ${playerProtocol.toUpperCase()}`, {
       description: "CDN stream active."
     });
-  }, [playerProtocol]);
+  };
 
-  const handleDownload = useCallback(async (file: OtherFile) => {
+  const handleDownload = async () => {
     const cdnUrl = await fetchCdnLink(file.torrent_id, file.file_id, file.account_id);
     if (!cdnUrl) return;
     window.open(cdnUrl, "_blank");
     toast.success("Download started");
-  }, []);
+  };
 
-  const handleSyncplay = useCallback(async (file: OtherFile) => {
+  const handleSyncplay = async () => {
     if (!LOCAL_DAEMON_PLAYERS.includes(playerProtocol)) return;
     const cdnUrl = await fetchCdnLink(file.torrent_id, file.file_id, file.account_id);
     if (!cdnUrl) return;
@@ -142,7 +143,6 @@ export function OtherFilesView({ files, isLoading, searchQuery, playerProtocol }
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ player: playerProtocol, url: cdnUrl }),
       });
-
       if (daemonRes.ok) {
         const resData = await daemonRes.json();
         toast.success(`Syncplay launched via ${playerProtocol.toUpperCase()}`, {
@@ -156,13 +156,186 @@ export function OtherFilesView({ files, isLoading, searchQuery, playerProtocol }
         description: e.message || "Ensure Aemond is running and syncplay.conf is configured.",
       });
     }
-  }, [playerProtocol]);
+  };
+
+  return (
+    <Card className="group relative overflow-hidden rounded-xl border-0 bg-black/40 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/20">
+      <div className="relative aspect-2/3 w-full overflow-hidden bg-muted/40">
+        
+        {thumbAvailable === true ? (
+          <img
+            src={thumbUrl}
+            alt={file.filename}
+            className="h-full w-full object-cover object-top transition-transform duration-500 group-hover:scale-105"
+            loading="lazy"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-linear-to-br from-muted/50 to-muted/20 text-muted-foreground">
+            <FileVideo size={48} className="opacity-40" />
+          </div>
+        )}
+
+        {/* Top Right: Account badge & 3-dots menu */}
+        <div className="absolute top-2 right-2 z-30 flex items-center gap-1.5 opacity-100 transition-opacity duration-300">
+          {account && <AccountBadge accountId={account.id} email={account.torbox_email} variant="overlay" />}
+
+          {/* Compact: always-visible three-dots at top-right */}
+          {compactActions && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="icon"
+                  className="h-8 w-8 rounded-full bg-black/50 hover:bg-black/80 text-white cursor-pointer ring-0 focus:outline-none"
+                >
+                  <MoreVertical size={15} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={6} className="min-w-42.5 bg-popover/95 backdrop-blur-xl border-border/60 shadow-2xl rounded-xl p-1.5">
+                <DropdownMenuItem onClick={handleStream} className="gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer text-sm font-medium hover:bg-violet-500/10 focus:bg-violet-500/10">
+                  <Play size={14} className="text-violet-400 fill-violet-400" />
+                  Stream
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleCopyLink} className="gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer text-sm font-medium hover:bg-primary/10 focus:bg-primary/10">
+                  <Copy size={14} className="text-muted-foreground" />
+                  Copy link
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleDownload} className="gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer text-sm font-medium hover:bg-emerald-500/10 focus:bg-emerald-500/10">
+                  <Download size={14} className="text-emerald-400" />
+                  Download
+                </DropdownMenuItem>
+                {LOCAL_DAEMON_PLAYERS.includes(playerProtocol) && (
+                  <DropdownMenuItem onClick={handleSyncplay} className="gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer text-sm font-medium hover:bg-amber-500/10 focus:bg-amber-500/10">
+                    <Users size={14} className="text-amber-400" />
+                    Syncplay
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+
+        {/* Always-visible bottom gradient overlay with title */}
+        <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black via-black/80 to-transparent pt-24 pb-3.5 px-3.5 transition-opacity duration-300 group-hover:opacity-0 pointer-events-none">
+          <h3 className="text-lg font-display font-bold text-white leading-snug line-clamp-2 drop-shadow-lg tracking-wide">
+            {file.filename}
+          </h3>
+        </div>
+
+        {/* Thumb Navigation arrows — visible on hover, no dark overlay */}
+        <div className="absolute top-1/3 inset-x-0 flex items-center justify-between px-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10">
+          {thumbAvailable === true ? (
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); setCurrentPos(p => Math.max(1, p - 1)); }}
+                disabled={currentPos <= 1}
+                className="p-1.5 rounded-full bg-black/50 text-white hover:bg-black/80 disabled:opacity-0 transition-all cursor-pointer shadow-xl backdrop-blur-xs border border-white/10"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setCurrentPos(p => Math.min(5, p + 1)); }}
+                disabled={currentPos >= 5}
+                className="p-1.5 rounded-full bg-black/50 text-white hover:bg-black/80 disabled:opacity-0 transition-all cursor-pointer shadow-xl backdrop-blur-xs border border-white/10"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </>
+          ) : <div />}
+        </div>
+
+        {/* Action buttons — visible on hover, no dark overlay */}
+        {!compactActions && (
+          <div className="absolute bottom-0 inset-x-0 p-2.5 sm:p-4 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10">
+            <Button
+              size="sm"
+              onClick={handleStream}
+              className="h-10 flex-1 sm:flex-none sm:w-10 shrink-0 bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+            >
+              <Play size={15} className="fill-current" />
+              <span className="sm:hidden">Play</span>
+            </Button>
+            <Button
+              size="icon"
+              variant="secondary"
+              onClick={handleCopyLink}
+              className="h-10 w-10 shrink-0 bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+              title="Copy CDN Link"
+            >
+              <Copy size={15} />
+            </Button>
+            <Button
+              size="icon"
+              variant="secondary"
+              onClick={handleDownload}
+              className="h-10 w-10 shrink-0 bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+              title="Download File"
+            >
+              <Download size={15} />
+            </Button>
+            {LOCAL_DAEMON_PLAYERS.includes(playerProtocol) && (
+              <Button
+                size="icon"
+                variant="secondary"
+                onClick={handleSyncplay}
+                className="h-10 w-10 shrink-0 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 cursor-pointer"
+                title="Syncplay with friends"
+              >
+                <Users size={15} />
+              </Button>
+            )}
+          </div>
+        )}
+        
+        {/* Thumb dots at very bottom overlay */}
+        {thumbAvailable === true && (
+          <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20 pointer-events-none">
+            {Array.from({ length: 5 }, (_, i) => (
+              <div key={i} className={`w-1.5 h-1.5 rounded-full shadow-sm ${i + 1 === currentPos ? "bg-white" : "bg-white/30"}`} />
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+export function OtherFilesView({ files, isLoading, searchQuery, playerProtocol }: OtherFilesViewProps) {
+  const narrow = useNarrow(640);
+  const { accounts, activeAccountId } = useFileStore();
+  const [generating, setGenerating] = useState(false);
+
+  const filtered = files.filter((f) =>
+    f.filename.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const handleGenerateThumbnails = async () => {
+    setGenerating(true);
+    try {
+      const res = await fetch("/api/thumbnails/generate", {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to generate thumbnails");
+      if (data.generated > 0) {
+        toast.success(`Generated thumbnails for ${data.generated} file${data.generated !== 1 ? "s" : ""}`);
+        window.location.reload();
+      } else if (data.failed > 0) {
+        toast.error(`Failed for ${data.failed} file${data.failed !== 1 ? "s" : ""}`);
+      } else {
+        toast.info("No files need thumbnail generation");
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Failed to generate thumbnails");
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   if (isLoading) {
     return (
-      <div className="flex flex-col gap-2">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <Skeleton key={i} className="h-16 w-full rounded-xl" />
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
+        {Array.from({ length: 10 }).map((_, i) => (
+          <Skeleton key={i} className="aspect-2/3 rounded-xl" />
         ))}
       </div>
     );
@@ -179,111 +352,36 @@ export function OtherFilesView({ files, isLoading, searchQuery, playerProtocol }
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      {filtered.map((file) => (
-        <Card
-          key={file.id}
-          className="p-3.5 flex items-center justify-between gap-4 rounded-xl border border-border/40 bg-card/40 hover:bg-card/70 transition"
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleGenerateThumbnails}
+          disabled={generating || filtered.length === 0}
+          className="gap-1.5"
         >
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
-              <FileText size={20} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold tracking-tight text-foreground truncate">
-                {file.filename}
-              </p>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                <span>{file.sizeFormatted} • {file.mime_type}</span>
-                {(() => {
-                  const acc = getAccount(file.account_id);
-                  return acc && <AccountBadge accountId={acc.id} email={acc.torbox_email} variant="inline" />;
-                })()}
-              </div>
-            </div>
-          </div>
-
-          {narrow ? (
-            <div className="flex items-center gap-1.5 shrink-0">
-              <Button
-                size="sm"
-                onClick={() => handleStream(file)}
-                className="h-8 text-xs font-semibold gap-1 bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer px-2.5"
-              >
-                <Play size={13} className="fill-current" />
-                Open
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    className="h-8 w-8 text-xs cursor-pointer ring-0 focus:outline-none"
-                  >
-                    <MoreVertical size={14} />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-37.5 bg-popover/95 backdrop-blur-xl border-border/60 shadow-xl rounded-xl p-1">
-                  <DropdownMenuItem onClick={() => handleCopyLink(file)} className="gap-2.5 px-3 py-2 rounded-lg cursor-pointer text-sm font-medium hover:bg-primary/10 focus:bg-primary/10">
-                    <Copy size={14} className="text-muted-foreground" />
-                    Copy link
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleDownload(file)} className="gap-2.5 px-3 py-2 rounded-lg cursor-pointer text-sm font-medium hover:bg-emerald-500/10 focus:bg-emerald-500/10">
-                    <Download size={14} className="text-emerald-400" />
-                    Download
-                  </DropdownMenuItem>
-                  {LOCAL_DAEMON_PLAYERS.includes(playerProtocol) && (
-                    <DropdownMenuItem onClick={() => handleSyncplay(file)} className="gap-2.5 px-3 py-2 rounded-lg cursor-pointer text-sm font-medium hover:bg-amber-500/10 focus:bg-amber-500/10">
-                      <Users size={14} className="text-amber-400" />
-                      Syncplay
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+          {generating ? (
+            <Loader2 size={14} className="animate-spin" />
           ) : (
-            <div className="flex items-center gap-1.5 shrink-0">
-              <Button
-                size="sm"
-                onClick={() => handleStream(file)}
-                className="h-8 text-xs font-semibold gap-1 bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
-              >
-                <Play size={13} className="fill-current" />
-                Open
-              </Button>
-              <Button
-                size="icon"
-                variant="outline"
-                onClick={() => handleCopyLink(file)}
-                className="h-8 w-8 text-xs cursor-pointer"
-                title="Copy Link"
-              >
-                <Copy size={13} />
-              </Button>
-              <Button
-                size="icon"
-                variant="outline"
-                onClick={() => handleDownload(file)}
-                className="h-8 w-8 text-xs cursor-pointer"
-                title="Download File"
-              >
-                <Download size={13} />
-              </Button>
-              {LOCAL_DAEMON_PLAYERS.includes(playerProtocol) && (
-                <Button
-                  size="icon"
-                  variant="outline"
-                  onClick={() => handleSyncplay(file)}
-                  className="h-8 w-8 text-xs text-amber-400 border-amber-500/30 hover:bg-amber-500/10 cursor-pointer"
-                  title="Syncplay with friends"
-                >
-                  <Users size={13} />
-                </Button>
-              )}
-            </div>
+            <Images size={14} />
           )}
-        </Card>
-      ))}
+          {generating ? "Generating..." : "Generate Thumbnails"}
+        </Button>
+        <p className="text-xs text-muted-foreground">{filtered.length} files</p>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
+        {filtered.map((file) => (
+          <FileCard 
+            key={file.id} 
+            file={file} 
+            playerProtocol={playerProtocol} 
+            accounts={accounts}
+            compactActions={narrow}
+          />
+        ))}
+      </div>
     </div>
   );
 }
