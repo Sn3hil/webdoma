@@ -88,7 +88,7 @@ export async function POST(request: Request) {
                 size: file.size || 0,
                 mimetype: file.mimetype || undefined,
               },
-              { skipSizeFilter: true, signal: controller.signal }, // cache already filtered files
+              { signal: controller.signal },
             );
             if (inserted) filesInserted++;
           } catch (e) {

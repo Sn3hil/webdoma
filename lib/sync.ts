@@ -17,7 +17,7 @@ import {
   upsertTvEpisode,
 } from "./db";
 import { getValidAccessToken, fetchTorrentList } from "./torbox";
-import { MIN_FILE_SIZE_BYTES } from "./torbox-config";
+import { MIN_FILE_SIZE_BYTES, MIN_SAMPLE_FILE_SIZE_BYTES } from "./torbox-config";
 import { VIDEO_EXTENSIONS, EXCLUDED_EXTENSIONS } from "./constants";
 import { parseMediaFilename, type ParsedMedia } from "./parser";
 
@@ -169,11 +169,16 @@ export async function processAndInsertFile(
 ): Promise<boolean> {
   const { skipSizeFilter = false } = options || {};
 
-  // Filter by minimum file size (skip for inline inserts where cache already filtered)
-  if (!skipSizeFilter && file.size < MIN_FILE_SIZE_BYTES) return false;
-
   const remotePath = file.name; // e.g. "Movie Folder/Movie.mkv"
   const filename = file.short_name || remotePath.split("/").pop() || remotePath;
+
+  // Filter by minimum file size; files with "sample" in the name use a higher threshold (1 GB)
+  if (!skipSizeFilter) {
+    const lowerFilename = filename.toLowerCase();
+    const isSample = lowerFilename.includes("sample");
+    const minSize = isSample ? MIN_SAMPLE_FILE_SIZE_BYTES : MIN_FILE_SIZE_BYTES;
+    if (file.size < minSize) return false;
+  }
 
   const ext = filename.split(".").pop()?.toLowerCase() || "";
   if (EXCLUDED_EXTENSIONS.has(ext)) {
@@ -184,14 +189,8 @@ export async function processAndInsertFile(
   const mimeType = file.mimetype || "application/octet-stream";
 
   if (!isVideoFile(filename, file.mimetype)) {
-    // Non-video file above size threshold — store as 'other'
-    upsertRemoteFile(
-      accountId, torrentId, file.id,
-      remotePath, filename, shortName,
-      file.size, mimeType, torrentHash,
-      null, null, null, "other"
-    );
-    return true;
+    // Non-video file — skip entirely, do not add to database
+    return false;
   }
 
   // Parse filename using parser
