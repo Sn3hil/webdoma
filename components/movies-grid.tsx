@@ -1,6 +1,6 @@
 "use client";
 
-import { Film, Play, Download, Copy, Users, MoreVertical } from "lucide-react";
+import { Film, Play, Download, Copy, Users, MoreVertical, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { launchPlayback } from "@/lib/client-play";
 import { WatchedProgressBar } from "@/components/watched-progress-bar";
 import { AccountBadge } from "@/components/account-badge";
 import { useFileStore } from "@/lib/store";
+import { DeleteTorrentDialog } from "@/components/delete-torrent-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -79,11 +80,14 @@ async function fetchCdnLink(torrentId: number, fileId: number, accountId: number
 export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: MoviesGridProps) {
   const { viewMode, accounts } = useFileStore();
   const compactActions = useCompactActions();
+  const [deletedIds, setDeletedIds] = useState<Set<number>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<MovieItem | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const getAccount = (id: number) => accounts.find(a => a.id === id);
 
   const filtered = movies.filter((m) =>
-    (m.title || m.filename).toLowerCase().includes(searchQuery.toLowerCase())
+    !deletedIds.has(m.id) && (m.title || m.filename).toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleCopyLink = useCallback(async (movie: MovieItem) => {
@@ -141,6 +145,27 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
     toast.success("Download started");
   }, []);
 
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch("/api/torrent/delete", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ torrent_id: deleteTarget.torrent_id, account_id: deleteTarget.account_id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete torrent");
+      setDeletedIds((prev) => new Set(prev).add(deleteTarget.id));
+      toast.success("Movie deleted", { description: deleteTarget.title });
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete torrent");
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
+    }
+  }, [deleteTarget]);
+
   if (isLoading) {
     return (
       <div className={viewMode === "list" ? "flex flex-col gap-3" : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5"}>
@@ -190,7 +215,7 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
                 {movie.year && <span>{movie.year}</span>}
                 {movie.year && <span className="text-muted-foreground/50">•</span>}
                 <span>{movie.sizeFormatted}</span>
-                
+
                 {(() => {
                   const acc = getAccount(movie.account_id);
                   return acc && <AccountBadge accountId={acc.id} email={acc.torbox_email} variant="inline" />;
@@ -236,6 +261,15 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
                 title="Download File"
               >
                 <Download size={13} />
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={() => setDeleteTarget(movie)}
+                className="h-8 w-8 shrink-0 text-xs text-red-400 border-red-500/30 hover:bg-red-500/10 cursor-pointer"
+                title="Delete Torrent"
+              >
+                <Trash2 size={13} />
               </Button>
             </div>
 
@@ -309,6 +343,10 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
                           Syncplay
                         </DropdownMenuItem>
                       )}
+                      <DropdownMenuItem onClick={() => setDeleteTarget(movie)} className="gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer text-sm font-medium hover:bg-red-500/10 focus:bg-red-500/10">
+                        <Trash2 size={14} className="text-red-400" />
+                        Delete
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 )}
@@ -349,7 +387,7 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
                     >
                       <Copy size={15} />
                     </Button>
-                    <Button
+                    {/* <Button
                       size="icon"
                       variant="secondary"
                       onClick={() => handleDownload(movie)}
@@ -357,7 +395,7 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
                       title="Download File"
                     >
                       <Download size={15} />
-                    </Button>
+                    </Button> */}
                     {LOCAL_DAEMON_PLAYERS.includes(playerProtocol) && (
                       <Button
                         size="icon"
@@ -369,6 +407,15 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
                         <Users size={15} />
                       </Button>
                     )}
+                    <Button
+                      size="icon"
+                      variant="secondary"
+                      onClick={() => setDeleteTarget(movie)}
+                      className="h-10 w-10 shrink-0 bg-red-500/20 hover:bg-red-500/30 text-red-300 cursor-pointer"
+                      title="Delete Torrent"
+                    >
+                      <Trash2 size={15} />
+                    </Button>
                   </div>
                 )}
               </div>
@@ -382,6 +429,15 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
           </Card>
         )
       ))}
+
+      <DeleteTorrentDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Movie?"
+        description={`This will permanently delete "${deleteTarget?.title}" from your TorBox account and remove it from your library. This action cannot be undone.`}
+        isDeleting={isDeleting}
+      />
     </div>
   );
 }

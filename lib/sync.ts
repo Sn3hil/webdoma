@@ -15,6 +15,7 @@ import {
   upsertRemoteFile,
   upsertMedia,
   upsertTvEpisode,
+  upsertTorrent,
 } from "./db";
 import { getValidAccessToken, fetchTorrentList } from "./torbox";
 import { MIN_FILE_SIZE_BYTES, MIN_SAMPLE_FILE_SIZE_BYTES } from "./torbox-config";
@@ -257,6 +258,16 @@ export async function processAndInsertFile(
 
   const epStart = parsed.episodes && parsed.episodes.length > 0 ? parsed.episodes[0] : null;
   const epEnd = parsed.episodes && parsed.episodes.length > 1 ? parsed.episodes[parsed.episodes.length - 1] : null;
+
+  upsertTorrent(
+    accountId,
+    torrentId,
+    null, // torrentName is only available at torrent creation, not from TorBox's mylist API files, though mylist API root gives it, processAndInsertFile is passed file only. We can pass null and it will update.
+    torrentHash,
+    mediaType,
+    mediaType === "tv" ? parsed.title : parsed.title, // or primary title
+    tmdbId
+  );
 
   upsertRemoteFile(
     accountId,

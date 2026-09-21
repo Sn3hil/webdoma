@@ -432,3 +432,41 @@ export async function createTorrent(
   }, 3, 1000, signal);
 }
 
+// Torrent Deletion
+
+export interface ControlTorrentResponse {
+  success: boolean;
+  error: string | null;
+  detail: string;
+  data: null;
+}
+
+/** Delete a torrent from TorBox account. */
+export async function deleteTorrent(
+  torrentId: number,
+  accessToken: string,
+  signal?: AbortSignal
+): Promise<ControlTorrentResponse> {
+  return withRetry(async (sig) => {
+    const res = await fetch(TORBOX_ENDPOINTS.TORRENTS_CONTROL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        torrent_id: torrentId,
+        operation: "delete",
+      }),
+      signal: sig
+    });
+
+    if (!res.ok) {
+      const err = new Error(`Failed to delete torrent (${res.status})`);
+      (err as any).status = res.status;
+      throw err;
+    }
+
+    return res.json();
+  }, 3, 1000, signal);
+}

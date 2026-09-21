@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Play, Download, Copy, FolderOpen, Users, MoreVertical, Loader2, ChevronLeft, ChevronRight, Images, FileVideo } from "lucide-react";
+import { FileText, Play, Download, Copy, FolderOpen, Users, MoreVertical, Loader2, ChevronLeft, ChevronRight, Images, FileVideo, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useState } from "react";
 import { AccountBadge } from "@/components/account-badge";
 import { useFileStore } from "@/lib/store";
+import { DeleteTorrentDialog } from "@/components/delete-torrent-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -63,9 +64,13 @@ async function fetchCdnLink(torrentId: number, fileId: number, accountId: number
   }
 }
 
-function FileCard({ file, playerProtocol, accounts, compactActions }: { file: OtherFile, playerProtocol: string, accounts: any[], compactActions: boolean }) {
+function FileCard({ file, playerProtocol, accounts, compactActions, onDeleted }: { file: OtherFile, playerProtocol: string, accounts: any[], compactActions: boolean, onDeleted: (id: number) => void }) {
   const [currentPos, setCurrentPos] = useState(1);
   const [thumbAvailable, setThumbAvailable] = useState<boolean | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isFetchingInfo, setIsFetchingInfo] = useState(false);
+  const [torrentInfo, setTorrentInfo] = useState<{ primary_title: string | null, primary_media_type: string, torrent_name: string | null } | null>(null);
 
   useEffect(() => {
     fetch(`/api/thumbnails/${file.account_id}/${file.torrent_id}/${file.file_id}/1`, { method: "HEAD" })
@@ -158,6 +163,44 @@ function FileCard({ file, playerProtocol, accounts, compactActions }: { file: Ot
     }
   };
 
+  const handleDeleteClick = async () => {
+    setIsFetchingInfo(true);
+    try {
+      const res = await fetch(`/api/torrent/info?account_id=${file.account_id}&torrent_id=${file.torrent_id}`);
+      if (res.ok) {
+        const info = await res.json();
+        setTorrentInfo(info);
+      } else {
+        setTorrentInfo(null);
+      }
+    } catch {
+      setTorrentInfo(null);
+    } finally {
+      setIsFetchingInfo(false);
+      setShowDeleteDialog(true);
+    }
+  };
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    try {
+      const res = await fetch("/api/torrent/delete", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ torrent_id: file.torrent_id, account_id: file.account_id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete torrent");
+      toast.success("File deleted", { description: file.filename });
+      onDeleted(file.id);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete torrent");
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteDialog(false);
+    }
+  };
+
   return (
     <Card className="group relative overflow-hidden rounded-xl border-0 bg-black/40 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/20">
       <div className="relative aspect-2/3 w-full overflow-hidden bg-muted/40">
@@ -209,6 +252,10 @@ function FileCard({ file, playerProtocol, accounts, compactActions }: { file: Ot
                     Syncplay
                   </DropdownMenuItem>
                 )}
+                <DropdownMenuItem onClick={handleDeleteClick} disabled={isFetchingInfo} className="gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer text-sm font-medium hover:bg-red-500/10 focus:bg-red-500/10">
+                  {isFetchingInfo ? <Loader2 size={14} className="text-red-400 animate-spin" /> : <Trash2 size={14} className="text-red-400" />}
+                  Delete
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -283,6 +330,16 @@ function FileCard({ file, playerProtocol, accounts, compactActions }: { file: Ot
                 <Users size={15} />
               </Button>
             )}
+            <Button
+              size="icon"
+              variant="secondary"
+              onClick={handleDeleteClick}
+              disabled={isFetchingInfo}
+              className="h-10 w-10 shrink-0 bg-red-500/20 hover:bg-red-500/30 text-red-300 cursor-pointer"
+              title="Delete Torrent"
+            >
+              {isFetchingInfo ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+            </Button>
           </div>
         )}
         
@@ -295,6 +352,19 @@ function FileCard({ file, playerProtocol, accounts, compactActions }: { file: Ot
           </div>
         )}
       </div>
+
+      <DeleteTorrentDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        onConfirm={handleDelete}
+        title="Delete File?"
+        description={
+          torrentInfo?.primary_title || torrentInfo?.torrent_name
+            ? `This file belongs to "${torrentInfo.primary_title || torrentInfo.torrent_name}". Deleting it will permanently remove the ENTIRE torrent from your TorBox account. This action cannot be undone.`
+            : `This will permanently delete "${file.filename}" from your TorBox account. This action cannot be undone.`
+        }
+        isDeleting={isDeleting}
+      />
     </Card>
   );
 }
@@ -303,9 +373,10 @@ export function OtherFilesView({ files, isLoading, searchQuery, playerProtocol }
   const narrow = useNarrow(640);
   const { accounts, activeAccountId } = useFileStore();
   const [generating, setGenerating] = useState(false);
+  const [deletedIds, setDeletedIds] = useState<Set<number>>(new Set());
 
   const filtered = files.filter((f) =>
-    f.filename.toLowerCase().includes(searchQuery.toLowerCase())
+    !deletedIds.has(f.id) && f.filename.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleGenerateThumbnails = async () => {
@@ -379,6 +450,7 @@ export function OtherFilesView({ files, isLoading, searchQuery, playerProtocol }
             playerProtocol={playerProtocol} 
             accounts={accounts}
             compactActions={narrow}
+            onDeleted={(id) => setDeletedIds((prev) => new Set(prev).add(id))}
           />
         ))}
       </div>

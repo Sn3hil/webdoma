@@ -214,6 +214,25 @@ try {
       )
       .run();
 
+    // torrents (parent table for torrent-level metadata)
+    globalForDb.__domaDb
+      .query(
+        `
+      CREATE TABLE IF NOT EXISTS torrents (
+        account_id         INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        torrent_id         INTEGER NOT NULL,
+        torrent_name       TEXT,
+        torrent_hash       TEXT,
+        primary_media_type TEXT DEFAULT 'other',
+        primary_title      TEXT,
+        tmdb_id            INTEGER REFERENCES media(tmdb_id) ON DELETE SET NULL,
+        synced_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (account_id, torrent_id)
+      )
+    `
+      )
+      .run();
+
     // Safe column additions for existing databases (idempotent)
     try { globalForDb.__domaDb.query("ALTER TABLE media ADD COLUMN backdrop_url TEXT").run(); } catch (_) { }
     try { globalForDb.__domaDb.query("ALTER TABLE media ADD COLUMN overview TEXT").run(); } catch (_) { }
@@ -734,8 +753,108 @@ export function clearRemoteFilesForAccount(accountId: number) {
   if (!db) return;
   try {
     db.query("DELETE FROM remote_list_cache WHERE account_id = ?").run(accountId);
+    db.query("DELETE FROM torrents WHERE account_id = ?").run(accountId);
   } catch (e) {
     console.error("clearRemoteFilesForAccount error:", e);
+  }
+}
+
+/**
+ * Delete all DB records associated with a specific torrent.
+ * Runs in a single transaction for atomicity and performance.
+ */
+export function deleteRemoteFilesByTorrent(accountId: number, torrentId: number) {
+  if (!db) return;
+  try {
+    const tx = db.transaction(() => {
+      db.query("DELETE FROM file_thumbnails WHERE account_id = ? AND torrent_id = ?").run(accountId, torrentId);
+      db.query("DELETE FROM user_watched WHERE account_id = ? AND torrent_id = ?").run(accountId, torrentId);
+      db.query("DELETE FROM remote_list_cache WHERE account_id = ? AND torrent_id = ?").run(accountId, torrentId);
+      db.query("DELETE FROM torrents WHERE account_id = ? AND torrent_id = ?").run(accountId, torrentId);
+    });
+    tx();
+  } catch (e) {
+    console.error("deleteRemoteFilesByTorrent error:", e);
+  }
+}
+
+export function upsertTorrent(
+  accountId: number,
+  torrentId: number,
+  torrentName: string | null,
+  torrentHash: string | null,
+  primaryMediaType: string,
+  primaryTitle: string | null,
+  tmdbId: number | null
+) {
+  if (!db) return;
+  try {
+    db.query(
+      `
+      INSERT INTO torrents (account_id, torrent_id, torrent_name, torrent_hash, primary_media_type, primary_title, tmdb_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(account_id, torrent_id) DO UPDATE SET
+        torrent_name = excluded.torrent_name,
+        torrent_hash = excluded.torrent_hash,
+        primary_media_type = CASE
+          WHEN torrents.primary_media_type = 'movie' THEN 'movie'
+          WHEN torrents.primary_media_type = 'tv' AND excluded.primary_media_type != 'movie' THEN 'tv'
+          ELSE excluded.primary_media_type
+        END,
+        primary_title = CASE
+          WHEN torrents.primary_media_type = 'movie' THEN torrents.primary_title
+          WHEN torrents.primary_media_type = 'tv' AND excluded.primary_media_type != 'movie' THEN torrents.primary_title
+          ELSE excluded.primary_title
+        END,
+        tmdb_id = CASE
+          WHEN torrents.primary_media_type = 'movie' THEN torrents.tmdb_id
+          WHEN torrents.primary_media_type = 'tv' AND excluded.primary_media_type != 'movie' THEN torrents.tmdb_id
+          ELSE excluded.tmdb_id
+        END,
+        synced_at = CURRENT_TIMESTAMP
+    `
+    ).run(accountId, torrentId, torrentName, torrentHash, primaryMediaType, primaryTitle, tmdbId);
+  } catch (e) {
+    console.error("upsertTorrent error:", e);
+  }
+}
+
+export function getTorrentInfo(accountId: number, torrentId: number) {
+  if (!db) return null;
+  try {
+    return db
+      .query(
+        `SELECT primary_title, primary_media_type, torrent_name
+         FROM torrents
+         WHERE account_id = ? AND torrent_id = ?`
+      )
+      .get(accountId, torrentId) as { primary_title: string | null; primary_media_type: string; torrent_name: string | null } | null;
+  } catch (e) {
+    console.error("getTorrentInfo error:", e);
+    return null;
+  }
+}
+
+/**
+ * Get all distinct torrent IDs for a TV show (by show title match).
+ * Used for batch deletion of an entire show's torrents.
+ */
+export function getTorrentIdsForTvShow(accountId: number, showTitle: string): number[] {
+  if (!db) return [];
+  try {
+    const rows = db
+      .query(
+        `SELECT DISTINCT r.torrent_id
+         FROM remote_list_cache r
+         LEFT JOIN media m ON r.tmdb_id = m.tmdb_id
+         WHERE r.account_id = ? AND r.media_type = 'tv'
+           AND LOWER(COALESCE(m.title, r.show_title, r.raw_title)) = LOWER(?)`
+      )
+      .all(accountId, showTitle) as { torrent_id: number }[];
+    return rows.map((r) => r.torrent_id);
+  } catch (e) {
+    console.error("getTorrentIdsForTvShow error:", e);
+    return [];
   }
 }
 
@@ -860,12 +979,14 @@ export function getTvShowDetailsForUser(userId: number, showTitle: string) {
            w.position_seconds,
            w.duration_seconds,
            w.completed,
-           w.hidden
+           w.hidden,
+           t.torrent_name
          FROM remote_list_cache r
          JOIN user_accounts ua ON r.account_id = ua.account_id
          LEFT JOIN media m ON r.tmdb_id = m.tmdb_id
          LEFT JOIN tv_episodes e ON (r.tmdb_id = e.show_tmdb_id AND r.season_number = e.season_number AND r.episode_number = e.episode_number)
          LEFT JOIN user_watched w ON w.user_id = ua.user_id AND w.account_id = r.account_id AND w.torrent_id = r.torrent_id AND w.file_id = r.file_id
+         LEFT JOIN torrents t ON t.account_id = r.account_id AND t.torrent_id = r.torrent_id
          WHERE ua.user_id = ? AND r.media_type = 'tv' AND LOWER(COALESCE(m.title, r.show_title, r.raw_title)) = LOWER(?)
          ORDER BY r.season_number ASC, r.episode_number ASC`
       )

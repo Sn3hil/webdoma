@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { ArrowLeft, Play, Download, Copy, Tv, Layers, Film, Loader2, Users, MoreVertical } from "lucide-react";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { ArrowLeft, Play, Download, Copy, Tv, Layers, Film, Loader2, Users, MoreVertical, Trash2, CheckCircle2, Circle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useFileStore } from "@/lib/store";
 import { AccountBadge } from "@/components/account-badge";
 import { WatchedProgressBar } from "@/components/watched-progress-bar";
+import { DeleteTorrentDialog } from "@/components/delete-torrent-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,6 +31,7 @@ interface Episode {
   episode_title: string;
   episode_overview?: string;
   still_url?: string;
+  torrent_name: string;
   percent?: number;
   completed?: boolean;
 }
@@ -99,9 +101,12 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
   const [selectedSeason, setSelectedSeason] = useState<number>(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeletingShow, setIsDeletingShow] = useState(false);
+  const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [selectedTorrents, setSelectedTorrents] = useState<Set<number>>(new Set());
 
-  useEffect(() => {
-    async function loadShowDetail() {
+  const loadShowDetail = useCallback(async () => {
       setIsLoading(true);
       setError(null);
       try {
@@ -121,10 +126,30 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
       } finally {
         setIsLoading(false);
       }
-    }
-
-    loadShowDetail();
   }, [showTitle]);
+
+  useEffect(() => {
+    loadShowDetail();
+  }, [loadShowDetail]);
+
+  const toggleTorrentSelection = (torrentId: number) => {
+    setSelectedTorrents(prev => {
+      const next = new Set(prev);
+      if (next.has(torrentId)) next.delete(torrentId);
+      else next.add(torrentId);
+      return next;
+    });
+  };
+
+  const affectedEpisodesCount = useMemo(() => {
+    let count = 0;
+    for (const s of seasons) {
+      for (const ep of s.episodes) {
+        if (selectedTorrents.has(ep.torrent_id)) count++;
+      }
+    }
+    return count;
+  }, [seasons, selectedTorrents]);
 
   const handleCopyLink = useCallback(async (ep: Episode) => {
     const cdnUrl = await fetchCdnLink(ep.torrent_id, ep.file_id, ep.account_id);
@@ -180,6 +205,57 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
       });
     }
   }, [playerProtocol]);
+
+  // Collect all unique torrent IDs and names from all episodes across all seasons
+  const uniqueTorrents = useMemo(() => {
+    const torrentMap = new Map<number, string>();
+    for (const s of seasons) {
+      for (const ep of s.episodes) {
+        if (!torrentMap.has(ep.torrent_id)) {
+          torrentMap.set(ep.torrent_id, ep.torrent_name);
+        }
+      }
+    }
+    return Array.from(torrentMap.entries()).map(([id, name]) => ({ id, name }));
+  }, [seasons]);
+
+  const allTorrentIds = useMemo(() => uniqueTorrents.map(t => t.id), [uniqueTorrents]);
+
+  // Get account_id from first episode (all episodes belong to same account for a show)
+  const showAccountId = useMemo(() => {
+    for (const s of seasons) {
+      if (s.episodes.length > 0) return s.episodes[0].account_id;
+    }
+    return null;
+  }, [seasons]);
+
+  const handleDeleteShow = useCallback(async () => {
+    if (!showAccountId || selectedTorrents.size === 0) return;
+    setIsDeletingShow(true);
+    try {
+      const res = await fetch("/api/torrent/delete", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ torrent_ids: Array.from(selectedTorrents), account_id: showAccountId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete show");
+      toast.success("Torrents deleted");
+      
+      if (selectedTorrents.size === allTorrentIds.length) {
+        onBack();
+      } else {
+        setIsDeleteMode(false);
+        setSelectedTorrents(new Set());
+        loadShowDetail();
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete show");
+    } finally {
+      setIsDeletingShow(false);
+      setShowDeleteDialog(false);
+    }
+  }, [showAccountId, selectedTorrents, allTorrentIds.length, onBack, loadShowDetail]);
 
   if (isLoading) {
     return (
@@ -260,6 +336,41 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
               <span className="flex items-center gap-1 bg-primary/10 text-primary px-2.5 py-1 rounded-md">
                 <Layers size={13} /> {seasons.length} {seasons.length === 1 ? "Season" : "Seasons"}
               </span>
+              {isDeleteMode ? (
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="default"
+                    onClick={() => setShowDeleteDialog(true)}
+                    disabled={selectedTorrents.size === 0}
+                    className="h-7 gap-1.5 text-[11px] font-semibold bg-red-500 hover:bg-red-600 text-white cursor-pointer"
+                  >
+                    <Trash2 size={12} />
+                    Delete {selectedTorrents.size} {selectedTorrents.size === 1 ? 'Torrent' : 'Torrents'} ({affectedEpisodesCount} eps)
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setIsDeleteMode(false);
+                      setSelectedTorrents(new Set());
+                    }}
+                    className="h-7 gap-1.5 text-[11px] font-semibold cursor-pointer"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIsDeleteMode(true)}
+                  className="h-7 gap-1.5 text-[11px] font-semibold text-red-400 border-red-500/30 hover:bg-red-500/10 hover:text-red-300 cursor-pointer"
+                >
+                  <Trash2 size={12} />
+                  Select to Delete
+                </Button>
+              )}
             </div>
 
             {showInfo.overview && (
@@ -293,16 +404,32 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
             viewMode === "list" ? (
               <div
                 key={ep.id}
-                className="group flex flex-col sm:flex-row items-stretch sm:items-center gap-4 px-4 py-3 rounded-xl border border-border/40 bg-card/40 hover:border-primary/40 transition-all overflow-hidden relative"
+                onClick={isDeleteMode ? () => toggleTorrentSelection(ep.torrent_id) : undefined}
+                className={`group flex flex-col sm:flex-row items-stretch sm:items-center gap-4 px-4 py-3 rounded-xl border transition-all overflow-hidden relative ${
+                  isDeleteMode 
+                    ? selectedTorrents.has(ep.torrent_id) 
+                      ? "border-red-500/50 bg-red-500/10 cursor-pointer" 
+                      : "border-border/40 bg-card/40 hover:border-red-500/30 cursor-pointer opacity-70"
+                    : "border-border/40 bg-card/40 hover:border-primary/40"
+                }`}
               >
                 {/* Still Thumbnail */}
                 <div className="w-16 h-10 shrink-0 rounded bg-muted/30 overflow-hidden relative border border-border/50">
                   {ep.still_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={ep.still_url} alt={ep.episode_title} className="object-cover w-full h-full" loading="lazy" />
+                    <img src={ep.still_url} alt={ep.episode_title} className={`object-cover w-full h-full ${isDeleteMode && selectedTorrents.has(ep.torrent_id) ? "opacity-50" : ""}`} loading="lazy" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-muted-foreground">
                       <Tv size={16} className="opacity-40" />
+                    </div>
+                  )}
+                  {isDeleteMode && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      {selectedTorrents.has(ep.torrent_id) ? (
+                        <CheckCircle2 size={20} className="text-red-500 fill-background" />
+                      ) : (
+                        <Circle size={20} className="text-muted-foreground/50" />
+                      )}
                     </div>
                   )}
                 </div>
@@ -325,6 +452,7 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
                 </div>
 
                 {/* Actions */}
+                {!isDeleteMode && (
                 <div className="flex items-center gap-1.5 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity sm:mt-0 pb-1 sm:pb-0">
                   <Button
                     size="sm"
@@ -364,6 +492,7 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
                     <Download size={13} />
                   </Button>
                 </div>
+                )}
 
                 <WatchedProgressBar
                   percent={ep.percent ?? null}
@@ -373,7 +502,14 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
             ) : (
               <Card
                 key={ep.id}
-                className="group relative overflow-hidden rounded-xl border border-border/40 bg-card/40 hover:border-primary/40 transition-all flex flex-col justify-between"
+                onClick={isDeleteMode ? () => toggleTorrentSelection(ep.torrent_id) : undefined}
+                className={`group relative overflow-hidden rounded-xl border transition-all flex flex-col justify-between ${
+                  isDeleteMode 
+                    ? selectedTorrents.has(ep.torrent_id) 
+                      ? "border-red-500/50 bg-red-500/10 cursor-pointer" 
+                      : "border-border/40 bg-card/40 hover:border-red-500/30 cursor-pointer opacity-70"
+                    : "border-border/40 bg-card/40 hover:border-primary/40"
+                }`}
               >
                 <div>
                   {/* Episode Still Container */}
@@ -383,12 +519,24 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
                       <img
                         src={ep.still_url}
                         alt={ep.episode_title}
-                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        className={`h-full w-full object-cover transition-transform duration-300 ${!isDeleteMode ? 'group-hover:scale-105' : ''}`}
                         loading="lazy"
                       />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center bg-linear-to-br from-muted/50 to-muted/20 text-muted-foreground">
                         <Tv size={36} className="opacity-30" />
+                      </div>
+                    )}
+
+                    {isDeleteMode && (
+                      <div className="absolute inset-0 bg-background/20 flex items-center justify-center z-40">
+                        {selectedTorrents.has(ep.torrent_id) ? (
+                          <div className="bg-red-500/20 rounded-full p-1">
+                            <CheckCircle2 size={32} className="text-red-500 fill-background shadow-lg" />
+                          </div>
+                        ) : (
+                          <Circle size={32} className="text-white/50 drop-shadow-md" />
+                        )}
                       </div>
                     )}
 
@@ -411,7 +559,7 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
                       })()}
 
                       {/* Compact: always-visible three-dots at top-right */}
-                      {compactActions && (
+                      {compactActions && !isDeleteMode && (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
@@ -459,7 +607,7 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
                 </div>
 
                 {/* Action Bar (Only visible when NOT compact) */}
-                {!compactActions && (
+                {!compactActions && !isDeleteMode && (
                   <div className="p-3 pt-0 flex items-center gap-1.5 border-t border-border/20 mt-auto shrink-0">
                     <Button
                       size="sm"
@@ -505,6 +653,19 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
           ))}
         </div>
       )}
+
+      <DeleteTorrentDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        onConfirm={handleDeleteShow}
+        title={selectedTorrents.size === allTorrentIds.length ? `Delete "${showInfo?.showTitle}"?` : `Delete ${selectedTorrents.size} Torrent(s)?`}
+        description={
+          selectedTorrents.size === allTorrentIds.length
+            ? `This will permanently delete all ${seasons.reduce((sum, s) => sum + s.episodes.length, 0)} episode(s) across ${seasons.length} season(s) from your TorBox account. This action cannot be undone.`
+            : `This will permanently delete ${selectedTorrents.size} selected torrent(s) from your TorBox account. This action cannot be undone.`
+        }
+        isDeleting={isDeletingShow}
+      />
     </div>
   );
 }

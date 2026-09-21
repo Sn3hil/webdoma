@@ -7,6 +7,7 @@ export const TORBOX_ENDPOINTS = {
   TORRENTS_REQUEST_DL: "https://api.torbox.app/v1/api/torrents/requestdl",
   TORRENTS_CHECK_CACHED: "https://api.torbox.app/v1/api/torrents/checkcached",
   TORRENTS_CREATE: "https://api.torbox.app/v1/api/torrents/createtorrent",
+  TORRENTS_CONTROL: "https://api.torbox.app/v1/api/torrents/controltorrent",
 } as const;
 
 // Auth Config
