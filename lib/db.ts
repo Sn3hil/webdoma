@@ -1018,7 +1018,14 @@ export function getOtherFilesForUser(userId: number) {
            w.position_seconds,
            w.duration_seconds,
            w.completed,
-           w.hidden
+           w.hidden,
+           EXISTS (
+             SELECT 1 FROM file_thumbnails ft
+             WHERE ft.account_id = r.account_id
+               AND ft.torrent_id = r.torrent_id
+               AND ft.file_id = r.file_id
+               AND ft.position = 1
+           ) AS has_thumbnail
          FROM remote_list_cache r
          JOIN user_accounts ua ON r.account_id = ua.account_id
          LEFT JOIN user_watched w ON w.user_id = ua.user_id AND w.account_id = r.account_id AND w.torrent_id = r.torrent_id AND w.file_id = r.file_id

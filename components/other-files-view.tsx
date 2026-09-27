@@ -37,6 +37,7 @@ interface OtherFile {
   filename: string;
   sizeFormatted: string;
   mime_type: string;
+  has_thumbnail: boolean;
 }
 
 interface OtherFilesViewProps {
@@ -66,18 +67,13 @@ async function fetchCdnLink(torrentId: number, fileId: number, accountId: number
 
 function FileCard({ file, playerProtocol, accounts, compactActions, onDeleted }: { file: OtherFile, playerProtocol: string, accounts: any[], compactActions: boolean, onDeleted: (id: number) => void }) {
   const [currentPos, setCurrentPos] = useState(1);
-  const [thumbAvailable, setThumbAvailable] = useState<boolean | null>(null);
+  const [imgFailed, setImgFailed] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isFetchingInfo, setIsFetchingInfo] = useState(false);
   const [torrentInfo, setTorrentInfo] = useState<{ primary_title: string | null, primary_media_type: string, torrent_name: string | null } | null>(null);
 
-  useEffect(() => {
-    fetch(`/api/thumbnails/${file.account_id}/${file.torrent_id}/${file.file_id}/1`, { method: "HEAD" })
-      .then((res) => setThumbAvailable(res.ok))
-      .catch(() => setThumbAvailable(false));
-  }, [file.account_id, file.torrent_id, file.file_id]);
-
+  const thumbOk = file.has_thumbnail && !imgFailed;
   const thumbUrl = `/api/thumbnails/${file.account_id}/${file.torrent_id}/${file.file_id}/${currentPos}`;
   const account = accounts.find(a => a.id === file.account_id);
 
@@ -205,12 +201,13 @@ function FileCard({ file, playerProtocol, accounts, compactActions, onDeleted }:
     <Card className="group relative overflow-hidden rounded-xl border-0 bg-black/40 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/20">
       <div className="relative aspect-2/3 w-full overflow-hidden bg-muted/40">
         
-        {thumbAvailable === true ? (
+        {thumbOk ? (
           <img
             src={thumbUrl}
             alt={file.filename}
             className="h-full w-full object-cover object-top transition-transform duration-500 group-hover:scale-105"
             loading="lazy"
+            onError={() => setImgFailed(true)}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-linear-to-br from-muted/50 to-muted/20 text-muted-foreground">
@@ -270,7 +267,7 @@ function FileCard({ file, playerProtocol, accounts, compactActions, onDeleted }:
 
         {/* Thumb Navigation arrows — visible on hover, no dark overlay */}
         <div className="absolute top-1/3 inset-x-0 flex items-center justify-between px-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10">
-          {thumbAvailable === true ? (
+          {thumbOk ? (
             <>
               <button
                 onClick={(e) => { e.stopPropagation(); setCurrentPos(p => Math.max(1, p - 1)); }}
@@ -344,7 +341,7 @@ function FileCard({ file, playerProtocol, accounts, compactActions, onDeleted }:
         )}
         
         {/* Thumb dots at very bottom overlay */}
-        {thumbAvailable === true && (
+        {thumbOk && (
           <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20 pointer-events-none">
             {Array.from({ length: 5 }, (_, i) => (
               <div key={i} className={`w-1.5 h-1.5 rounded-full shadow-sm ${i + 1 === currentPos ? "bg-white" : "bg-white/30"}`} />

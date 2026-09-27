@@ -27,6 +27,7 @@ export async function GET() {
       mime_type: row.mime_type,
       percent: (!row.duration_seconds || row.duration_seconds <= 0) ? 0 : Math.min(100, Math.round((row.position_seconds / row.duration_seconds) * 100)),
       completed: !!row.completed,
+      has_thumbnail: !!row.has_thumbnail,
     }));
 
     return NextResponse.json({ items });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { launchPlayback } from "@/lib/client-play";
@@ -11,12 +11,16 @@ interface ContinueWatchingRowProps {
   playerProtocol: string;
 }
 
+const FOCUS_RELOAD_MIN_INTERVAL_MS = 10_000;
+
 export function ContinueWatchingRow({ playerProtocol }: ContinueWatchingRowProps) {
   const { viewMode } = useFileStore();
   const [items, setItems] = useState<ContinueWatchingItem[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const lastLoadAtRef = useRef(0);
 
   const load = useCallback(async () => {
+    lastLoadAtRef.current = Date.now();
     try {
       const res = await fetch("/api/library/continue-watching");
       if (!res.ok) return;
@@ -30,11 +34,17 @@ export function ContinueWatchingRow({ playerProtocol }: ContinueWatchingRowProps
 
   useEffect(() => {
     load();
-    let timeoutId: NodeJS.Timeout;
+    let timeoutId: NodeJS.Timeout | undefined;
     const onFocus = () => {
+      // Debounce: collapse rapid focus/blur bursts into a single scheduled load.
+      clearTimeout(timeoutId);
       // Add a small delay so the player's final progress save can reach the backend
       // before we fetch the new continue watching list.
-      timeoutId = setTimeout(load, 500);
+      timeoutId = setTimeout(() => {
+        // Throttle: skip if a load already happened recently.
+        if (Date.now() - lastLoadAtRef.current < FOCUS_RELOAD_MIN_INTERVAL_MS) return;
+        load();
+      }, 500);
     };
 
     window.addEventListener("focus", onFocus);
