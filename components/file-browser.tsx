@@ -78,6 +78,60 @@ export function FileBrowser({ playerProtocol, hasAccounts, accounts: accountsPro
     return () => window.removeEventListener("torrent-files-updated", handleFilesUpdated);
   }, [loadData]);
 
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Tab key cycling
+      if (e.key === "Tab") {
+        e.preventDefault();
+        setActiveTab((prev) => {
+          if (prev === "movies") return "tv";
+          if (prev === "tv") return "other";
+          return "movies";
+        });
+        setSelectedShowTitle(null);
+        return;
+      }
+
+      // Ctrl + 1, 2, 3 selection
+      if (e.ctrlKey && (e.key === "1" || e.key === "2" || e.key === "3")) {
+        e.preventDefault();
+        if (e.key === "1") setActiveTab("movies");
+        if (e.key === "2") setActiveTab("tv");
+        if (e.key === "3") setActiveTab("other");
+        setSelectedShowTitle(null);
+        return;
+      }
+
+      if (e.key === "Escape") {
+        setSearchQuery("");
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+        return;
+      }
+
+      const activeTag = document.activeElement?.tagName.toLowerCase();
+      if (
+        activeTag === "input" || 
+        activeTag === "textarea" || 
+        (document.activeElement as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
+
+      if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const searchInput = document.getElementById("global-search-input") as HTMLInputElement;
+        if (searchInput) {
+          searchInput.focus();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const handleAddAccountSuccess = () => {
     setIsAddAccountOpen(false);
     window.location.reload();
@@ -176,6 +230,7 @@ export function FileBrowser({ playerProtocol, hasAccounts, accounts: accountsPro
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
               />
               <Input
+                id="global-search-input"
                 placeholder={`Search ${activeTab === "movies" ? "movies" : activeTab === "tv" ? "TV shows" : "files"}...`}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
