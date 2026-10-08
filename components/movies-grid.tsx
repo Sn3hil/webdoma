@@ -272,17 +272,21 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
 
   return (
     <div className={viewMode === "list" ? "flex flex-col gap-3" : "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5"}>
-      {groupedMovies.map((movieGroup) => (
-        viewMode === "list" ? (
+      {viewMode === "list" ? (
+        filtered.map((movie) => (
           <div
-            key={movieGroup.groupId}
-            className="group flex flex-col sm:flex-row items-stretch sm:items-center gap-4 px-4 py-3 rounded-xl border border-border/40 bg-card/40 hover:border-primary/40 transition-all overflow-hidden relative"
+            key={movie.id}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleStream(movie);
+            }}
+            className="navigable-card group flex flex-col sm:flex-row items-stretch sm:items-center gap-4 px-4 py-3 rounded-xl border border-border/40 bg-card/40 hover:border-primary/40 focus:border-primary focus:ring-2 focus:ring-primary focus:outline-none transition-all overflow-hidden relative cursor-pointer"
           >
             {/* Poster Thumbnail */}
             <div className="w-12 h-16 shrink-0 rounded bg-muted/30 overflow-hidden relative border border-border/50">
-              {movieGroup.poster_url ? (
+              {movie.poster_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={movieGroup.poster_url} alt={movieGroup.title} className="object-cover w-full h-full" loading="lazy" />
+                <img src={movie.poster_url} alt={movie.title} className="object-cover w-full h-full" loading="lazy" />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-muted-foreground">
                   <Film size={20} className="opacity-40" />
@@ -293,22 +297,17 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
             {/* Info */}
             <div className="flex-1 min-w-0 flex flex-col justify-center">
               <h3 className="text-sm font-bold tracking-tight text-foreground truncate group-hover:text-primary transition-colors">
-                {movieGroup.title}
+                {movie.filename}
               </h3>
               <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-1">
-                {movieGroup.year && <span>{movieGroup.year}</span>}
-                {movieGroup.year && <span className="text-muted-foreground/50">•</span>}
-                {movieGroup.versions.length > 1 ? (
-                  <span>{movieGroup.versions.length} Versions</span>
-                ) : (
-                  <>
-                    <span>{movieGroup.versions[0].sizeFormatted}</span>
-                    {(() => {
-                      const acc = getAccount(movieGroup.versions[0].account_id);
-                      return acc && <AccountBadge accountId={acc.id} email={acc.torbox_email} variant="inline" />;
-                    })()}
-                  </>
-                )}
+                {movie.year && <span>{movie.year}</span>}
+                {movie.year && <span className="text-muted-foreground/50">•</span>}
+                <span>{movie.sizeFormatted}</span>
+
+                {(() => {
+                  const acc = getAccount(movie.account_id);
+                  return acc && <AccountBadge accountId={acc.id} email={acc.torbox_email} variant="inline" />;
+                })()}
               </div>
             </div>
 
@@ -316,7 +315,7 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
             <div className="flex items-center gap-1.5 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity sm:mt-0 pb-1 sm:pb-0">
               <Button
                 size="sm"
-                onClick={() => onActionClick(movieGroup, "stream")}
+                onClick={() => handleStream(movie)}
                 className="h-8 text-xs font-semibold gap-1 bg-primary text-primary-foreground hover:bg-primary/90 shadow-md cursor-pointer"
               >
                 <Play size={13} className="fill-current" />
@@ -326,7 +325,7 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
                 <Button
                   size="icon"
                   variant="outline"
-                  onClick={() => onActionClick(movieGroup, "syncplay")}
+                  onClick={() => handleSyncplay(movie)}
                   className="h-8 w-8 shrink-0 text-xs text-amber-400 border-amber-500/30 hover:bg-amber-500/10 cursor-pointer"
                   title="Syncplay with friends"
                 >
@@ -336,7 +335,7 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
               <Button
                 size="icon"
                 variant="outline"
-                onClick={() => onActionClick(movieGroup, "copy")}
+                onClick={() => handleCopyLink(movie)}
                 className="h-8 w-8 shrink-0 text-xs cursor-pointer"
                 title="Copy CDN Link"
               >
@@ -345,7 +344,7 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
               <Button
                 size="icon"
                 variant="outline"
-                onClick={() => onActionClick(movieGroup, "download")}
+                onClick={() => handleDownload(movie)}
                 className="h-8 w-8 shrink-0 text-xs cursor-pointer"
                 title="Download File"
               >
@@ -354,7 +353,7 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
               <Button
                 size="icon"
                 variant="outline"
-                onClick={() => onActionClick(movieGroup, "delete")}
+                onClick={() => setDeleteTarget(movie)}
                 className="h-8 w-8 shrink-0 text-xs text-red-400 border-red-500/30 hover:bg-red-500/10 cursor-pointer"
                 title="Delete Torrent"
               >
@@ -363,14 +362,20 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
             </div>
 
             <WatchedProgressBar
-              percent={movieGroup.percent ?? null}
-              completed={movieGroup.completed}
+              percent={movie.percent ?? null}
+              completed={movie.completed}
             />
           </div>
-        ) : (
+        ))
+      ) : (
+        groupedMovies.map((movieGroup) => (
           <Card
             key={movieGroup.groupId}
-            className="group relative overflow-hidden rounded-xl border-0 bg-black/40 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/20"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onActionClick(movieGroup, "stream");
+            }}
+            className="navigable-card group relative overflow-hidden rounded-xl border-0 bg-black/40 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/20 focus:ring-4 focus:ring-primary focus:outline-none cursor-pointer"
           >
             <div className="relative aspect-2/3 w-full overflow-hidden bg-muted/40">
               {movieGroup.poster_url ? (
@@ -529,8 +534,8 @@ export function MoviesGrid({ movies, isLoading, searchQuery, playerProtocol }: M
               />
             </div>
           </Card>
-        )
-      ))}
+        ))
+      )}
 
       <Dialog open={!!actionState} onOpenChange={(open) => { if (!open) setActionState(null); }}>
         <DialogContent className="sm:max-w-md bg-background/95 backdrop-blur-xl border-border/60">

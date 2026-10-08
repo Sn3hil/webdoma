@@ -99,6 +99,13 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
   const [showInfo, setShowInfo] = useState<ShowInfo | null>(null);
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<number>(1);
+
+  // Save selected season when it changes, but ONLY after seasons have loaded
+  useEffect(() => {
+    if (seasons.length > 0 && selectedSeason > 0) {
+      sessionStorage.setItem(`webdoma_season_${showTitle}`, selectedSeason.toString());
+    }
+  }, [selectedSeason, seasons.length, showTitle]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -119,7 +126,12 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
         setShowInfo(data.show);
         setSeasons(data.seasons || []);
         if (data.seasons && data.seasons.length > 0) {
-          setSelectedSeason(data.seasons[0].seasonNumber);
+          const savedSeason = sessionStorage.getItem(`webdoma_season_${showTitle}`);
+          if (savedSeason && data.seasons.some((s: Season) => s.seasonNumber === parseInt(savedSeason, 10))) {
+            setSelectedSeason(parseInt(savedSeason, 10));
+          } else {
+            setSelectedSeason(data.seasons[0].seasonNumber);
+          }
         }
       } catch (e: any) {
         setError(e.message || "Failed to load show");
@@ -131,6 +143,41 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
   useEffect(() => {
     loadShowDetail();
   }, [loadShowDetail]);
+
+  // Keyboard: Tab cycles seasons, Ctrl+1/2/3/… jumps to season by index
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeTag = document.activeElement?.tagName.toLowerCase();
+      if (activeTag === "input" || activeTag === "textarea" || (document.activeElement as HTMLElement)?.isContentEditable) {
+        return;
+      }
+
+      if (seasons.length === 0) return;
+
+      if (e.key === "Tab") {
+        e.preventDefault();
+        setSelectedSeason((prev) => {
+          const idx = seasons.findIndex((s) => s.seasonNumber === prev);
+          const nextIdx = (idx + 1) % seasons.length;
+          return seasons[nextIdx].seasonNumber;
+        });
+        return;
+      }
+
+      // Ctrl + 1–9 selects the Nth season (1-indexed)
+      if (e.ctrlKey && e.key >= "1" && e.key <= "9") {
+        const seasonIdx = parseInt(e.key, 10) - 1;
+        if (seasonIdx < seasons.length) {
+          e.preventDefault();
+          setSelectedSeason(seasons[seasonIdx].seasonNumber);
+        }
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [seasons]);
 
   const toggleTorrentSelection = (torrentId: number) => {
     setSelectedTorrents(prev => {
@@ -404,12 +451,16 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
             viewMode === "list" ? (
               <div
                 key={ep.id}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleStream(ep);
+                }}
                 onClick={isDeleteMode ? () => toggleTorrentSelection(ep.torrent_id) : undefined}
-                className={`group flex flex-col sm:flex-row items-stretch sm:items-center gap-4 px-4 py-3 rounded-xl border transition-all overflow-hidden relative ${
+                className={`navigable-card group flex flex-col sm:flex-row items-stretch sm:items-center gap-4 px-4 py-3 rounded-xl border transition-all overflow-hidden relative focus:border-primary focus:ring-2 focus:ring-primary focus:outline-none cursor-pointer ${
                   isDeleteMode 
                     ? selectedTorrents.has(ep.torrent_id) 
-                      ? "border-red-500/50 bg-red-500/10 cursor-pointer" 
-                      : "border-border/40 bg-card/40 hover:border-red-500/30 cursor-pointer opacity-70"
+                      ? "border-red-500/50 bg-red-500/10" 
+                      : "border-border/40 bg-card/40 hover:border-red-500/30 opacity-70"
                     : "border-border/40 bg-card/40 hover:border-primary/40"
                 }`}
               >
@@ -502,12 +553,16 @@ export function TvShowDetail({ showTitle, playerProtocol, onBack }: TvShowDetail
             ) : (
               <Card
                 key={ep.id}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleStream(ep);
+                }}
                 onClick={isDeleteMode ? () => toggleTorrentSelection(ep.torrent_id) : undefined}
-                className={`group relative overflow-hidden rounded-xl border transition-all flex flex-col justify-between ${
+                className={`navigable-card group relative overflow-hidden rounded-xl border transition-all flex flex-col justify-between focus:ring-4 focus:ring-primary focus:outline-none cursor-pointer ${
                   isDeleteMode 
                     ? selectedTorrents.has(ep.torrent_id) 
-                      ? "border-red-500/50 bg-red-500/10 cursor-pointer" 
-                      : "border-border/40 bg-card/40 hover:border-red-500/30 cursor-pointer opacity-70"
+                      ? "border-red-500/50 bg-red-500/10" 
+                      : "border-border/40 bg-card/40 hover:border-red-500/30 opacity-70"
                     : "border-border/40 bg-card/40 hover:border-primary/40"
                 }`}
               >

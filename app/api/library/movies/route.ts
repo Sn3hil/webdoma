@@ -1,18 +1,21 @@
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getMoviesForUser } from "@/lib/db";
 import { formatBytes } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await getSession();
     if (!session.userId) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const rawMovies = getMoviesForUser(session.userId);
+    const accountIdParam = request.nextUrl.searchParams.get("account_id");
+    const accountId = accountIdParam ? parseInt(accountIdParam, 10) : undefined;
+
+    const rawMovies = getMoviesForUser(session.userId, accountId);
 
     const items = rawMovies.map((row) => ({
       id: row.id,

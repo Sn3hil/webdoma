@@ -198,7 +198,13 @@ function FileCard({ file, playerProtocol, accounts, compactActions, onDeleted }:
   };
 
   return (
-    <Card className="group relative overflow-hidden rounded-xl border-0 bg-black/40 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/20">
+    <Card 
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') handleStream();
+      }}
+      className="navigable-card group relative overflow-hidden rounded-xl border-0 bg-black/40 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/20 focus:ring-4 focus:ring-primary focus:outline-none cursor-pointer"
+    >
       <div className="relative aspect-2/3 w-full overflow-hidden bg-muted/40">
         
         {thumbOk ? (
