@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { Film, Tv, FolderOpen, Search, PlusCircle, Loader2 } from "lucide-react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { Film, Tv, FolderOpen, Search, PlusCircle, Loader2, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MoviesGrid } from "@/components/movies-grid";
@@ -10,6 +10,13 @@ import { TvShowDetail } from "@/components/tv-show-detail";
 import { OtherFilesView } from "@/components/other-files-view";
 import { AddAccountForm } from "@/components/add-account-form";
 import { ContinueWatchingRow } from "@/components/continue-watching-row";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { AccountBadge } from "@/components/account-badge";
 import { toast } from "sonner";
 import { useFileStore } from "@/lib/store";
 
@@ -20,19 +27,53 @@ interface FileBrowserProps {
 }
 
 export function FileBrowser({ playerProtocol, hasAccounts, accounts: accountsProp }: FileBrowserProps) {
-  const { activeAccountId, isAddingAccount, accounts, setAccounts } = useFileStore();
+  const { activeAccountId, setActiveAccountId, isAddingAccount, accounts, setAccounts } = useFileStore();
 
-  const [activeTab, setActiveTab] = useState<"movies" | "tv" | "other">("movies");
+  const [activeTab, setActiveTab] = useState<"movies" | "tv" | "other">(() => {
+    if (typeof window !== "undefined") {
+      return (sessionStorage.getItem("webdoma_activeTab") as any) || "movies";
+    }
+    return "movies";
+  });
   const [selectedShowTitle, setSelectedShowTitle] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
+
+  // Save active tab
+  useEffect(() => {
+    sessionStorage.setItem("webdoma_activeTab", activeTab);
+  }, [activeTab]);
+
+  // Restore scroll position
+  useEffect(() => {
+    if (!isLoading && !selectedShowTitle && scrollRef.current) {
+      const savedScroll = sessionStorage.getItem(`webdoma_scroll_${activeTab}`);
+      if (savedScroll) {
+        // Use requestAnimationFrame to ensure the DOM has painted the list items
+        requestAnimationFrame(() => {
+          if (scrollRef.current) {
+            scrollRef.current.scrollTop = parseInt(savedScroll, 10);
+          }
+        });
+      }
+    }
+  }, [isLoading, activeTab, selectedShowTitle]);
+
+  const handleScroll = useCallback(() => {
+    // Only save scroll if we are not loading, and have actual scroll height to avoid saving 0 during layout shifts
+    if (scrollRef.current && !selectedShowTitle && !isLoading) {
+      if (scrollRef.current.scrollHeight > scrollRef.current.clientHeight) {
+        sessionStorage.setItem(`webdoma_scroll_${activeTab}`, scrollRef.current.scrollTop.toString());
+      }
+    }
+  }, [activeTab, selectedShowTitle, isLoading]);
 
   const [movies, setMovies] = useState<any[]>([]);
   const [tvShows, setTvShows] = useState<any[]>([]);
   const [otherFiles, setOtherFiles] = useState<any[]>([]);
-
-  const [isLoading, setIsLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-
-  const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!hasAccounts) return;
@@ -81,6 +122,13 @@ export function FileBrowser({ playerProtocol, hasAccounts, accounts: accountsPro
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // When inside a TV show detail view, let tv-show-detail handle Tab/Ctrl+N
+      if (selectedShowTitle) {
+        if (e.key === "Tab" || (e.ctrlKey && (e.key === "1" || e.key === "2" || e.key === "3"))) {
+          return;
+        }
+      }
+
       // Tab key cycling
       if (e.key === "Tab") {
         e.preventDefault();
@@ -120,6 +168,60 @@ export function FileBrowser({ playerProtocol, hasAccounts, accounts: accountsPro
         return;
       }
 
+      // Home / End scroll
+      if (e.key === "Home") {
+        e.preventDefault();
+        if (scrollRef.current) scrollRef.current.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+      if (e.key === "End") {
+        e.preventDefault();
+        if (scrollRef.current) scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+        return;
+      }
+
+      // Arrow keys grid navigation
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        const cards = Array.from(document.querySelectorAll('.navigable-card')) as HTMLElement[];
+        if (cards.length > 0) {
+          e.preventDefault();
+          const active = document.activeElement as HTMLElement;
+          const activeIndex = cards.indexOf(active);
+
+          if (activeIndex === -1) {
+            cards[0].focus();
+            // Optional: immediately scroll it into view properly
+            cards[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+          }
+
+          let nextIndex = activeIndex;
+          if (e.key === 'ArrowLeft') {
+            nextIndex = activeIndex > 0 ? activeIndex - 1 : activeIndex;
+          } else if (e.key === 'ArrowRight') {
+            nextIndex = activeIndex < cards.length - 1 ? activeIndex + 1 : activeIndex;
+          } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            const firstTop = cards[0].offsetTop;
+            let cols = 0;
+            for (let i = 0; i < cards.length; i++) {
+              if (cards[i].offsetTop === firstTop) cols++;
+              else break;
+            }
+            if (e.key === 'ArrowUp') {
+              nextIndex = activeIndex - cols >= 0 ? activeIndex - cols : activeIndex;
+            } else {
+              nextIndex = activeIndex + cols < cards.length ? activeIndex + cols : activeIndex;
+            }
+          }
+          
+          if (nextIndex !== activeIndex) {
+            cards[nextIndex].focus();
+            cards[nextIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          return;
+        }
+      }
+
       if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
         const searchInput = document.getElementById("global-search-input") as HTMLInputElement;
         if (searchInput) {
@@ -130,7 +232,7 @@ export function FileBrowser({ playerProtocol, hasAccounts, accounts: accountsPro
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [selectedShowTitle]);
 
   const handleAddAccountSuccess = () => {
     setIsAddAccountOpen(false);
@@ -224,25 +326,59 @@ export function FileBrowser({ playerProtocol, hasAccounts, accounts: accountsPro
         {/* Right action controls */}
         <div className="flex items-center gap-2 w-full sm:w-auto">
           {!selectedShowTitle && (
-            <div className="relative flex-1 sm:w-64">
-              <Search
-                size={15}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                id="global-search-input"
-                placeholder={`Search ${activeTab === "movies" ? "movies" : activeTab === "tv" ? "TV shows" : "files"}...`}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 h-9 bg-muted border-0 focus-visible:ring-1 focus-visible:ring-primary/50 text-xs rounded-xl shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] transition-all"
-              />
-            </div>
+            <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9 gap-2 shrink-0">
+                    <Filter size={14} className="text-muted-foreground" />
+                    <span className="truncate max-w-[120px]">
+                      {activeAccountId 
+                        ? accounts.find(a => a.id === activeAccountId)?.torbox_email || "Account" 
+                        : "All Accounts"}
+                    </span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56 bg-popover/95 backdrop-blur-xl border-border/60">
+                  <DropdownMenuItem onClick={() => setActiveAccountId(null)} className="cursor-pointer font-medium">
+                     All Accounts
+                  </DropdownMenuItem>
+                  {accounts.map(acc => (
+                    <DropdownMenuItem 
+                       key={acc.id} 
+                       onClick={() => setActiveAccountId(acc.id)} 
+                       className="cursor-pointer gap-2"
+                    >
+                      <AccountBadge accountId={acc.id} email={acc.torbox_email} variant="inline" />
+                      <span className="truncate">{acc.torbox_email}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <div className="relative flex-1 sm:w-64">
+                <Search
+                  size={15}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  id="global-search-input"
+                  placeholder={`Search ${activeTab === "movies" ? "movies" : activeTab === "tv" ? "TV shows" : "files"}...`}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 h-9 bg-muted border-0 focus-visible:ring-1 focus-visible:ring-primary/50 text-xs rounded-xl shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] transition-all"
+                />
+              </div>
+            </>
           )}
         </div>
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-6">
+      <div 
+        className="flex-1 overflow-y-auto p-4 md:p-6" 
+        ref={scrollRef} 
+        onScroll={handleScroll}
+      >
         {selectedShowTitle && activeTab === "tv" ? (
           <TvShowDetail
             showTitle={selectedShowTitle}

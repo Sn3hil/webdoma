@@ -56,8 +56,12 @@ export function TvShowsGrid({ shows, isLoading, searchQuery, onSelectShow }: TvS
         viewMode === "list" ? (
           <div
             key={show.show_title}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onSelectShow(show.show_title);
+            }}
             onClick={() => onSelectShow(show.show_title)}
-            className="group flex flex-col sm:flex-row items-stretch sm:items-center gap-4 px-4 py-3 rounded-xl border border-border/40 bg-card/40 hover:border-primary/40 transition-all overflow-hidden relative cursor-pointer"
+            className="navigable-card group flex flex-col sm:flex-row items-stretch sm:items-center gap-4 px-4 py-3 rounded-xl border border-border/40 bg-card/40 hover:border-primary/40 focus:border-primary focus:ring-2 focus:ring-primary focus:outline-none transition-all overflow-hidden relative cursor-pointer"
           >
             {/* Poster Thumbnail */}
             <div className="w-12 h-16 shrink-0 rounded bg-muted/30 overflow-hidden relative border border-border/50">
@@ -88,8 +92,12 @@ export function TvShowsGrid({ shows, isLoading, searchQuery, onSelectShow }: TvS
         ) : (
         <Card
           key={show.show_title}
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onSelectShow(show.show_title);
+          }}
           onClick={() => onSelectShow(show.show_title)}
-          className="group relative cursor-pointer overflow-hidden rounded-xl border-0 bg-black/40 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/20 flex flex-col"
+          className="navigable-card group relative cursor-pointer overflow-hidden rounded-xl border-0 bg-black/40 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/20 focus:ring-4 focus:ring-primary focus:outline-none flex flex-col"
         >
           {/* Poster Container */}
           <div className="relative aspect-2/3 w-full overflow-hidden bg-muted/40">

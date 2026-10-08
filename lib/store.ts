@@ -29,7 +29,7 @@ interface FileStoreState {
   setAccounts: (accounts: TorBoxAccount[]) => void;
 
   // Actions
-  setActiveAccountId: (accountId: number) => void;
+  setActiveAccountId: (accountId: number | null) => void;
   setIsAddingAccount: (isAdding: boolean) => void;
   setCurrentPath: (path: string) => void;
   setViewMode: (mode: "grid" | "list") => void;

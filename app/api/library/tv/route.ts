@@ -1,17 +1,20 @@
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import { getSession } from "@/lib/session";
 import { getTvShowsForUser } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await getSession();
     if (!session.userId) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const rawShows = getTvShowsForUser(session.userId);
+    const accountIdParam = request.nextUrl.searchParams.get("account_id");
+    const accountId = accountIdParam ? parseInt(accountIdParam, 10) : undefined;
+
+    const rawShows = getTvShowsForUser(session.userId, accountId);
 
     const shows = rawShows.map((row) => ({
       show_title: row.show_title,

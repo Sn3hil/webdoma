@@ -860,12 +860,10 @@ export function getTorrentIdsForTvShow(accountId: number, showTitle: string): nu
 
 // ── User-level queries (merge all accounts) ────────────────────────────────────
 
-export function getMoviesForUser(userId: number) {
+export function getMoviesForUser(userId: number, accountId?: number) {
   if (!db) return [];
   try {
-    return db
-      .query(
-        `SELECT
+    let queryStr = `SELECT
            r.id,
            r.account_id,
            r.torrent_id,
@@ -893,22 +891,26 @@ export function getMoviesForUser(userId: number) {
          JOIN user_accounts ua ON r.account_id = ua.account_id
          LEFT JOIN media m ON r.tmdb_id = m.tmdb_id
          LEFT JOIN user_watched w ON w.user_id = ua.user_id AND w.account_id = r.account_id AND w.torrent_id = r.torrent_id AND w.file_id = r.file_id
-         WHERE ua.user_id = ? AND r.media_type = 'movie'
-         ORDER BY COALESCE(m.title, r.raw_title, r.filename) ASC`
-      )
-      .all(userId) as any[];
+         WHERE ua.user_id = ? AND r.media_type = 'movie'`;
+    
+    const params: any[] = [userId];
+    if (accountId) {
+      queryStr += ` AND r.account_id = ?`;
+      params.push(accountId);
+    }
+    queryStr += ` ORDER BY COALESCE(m.title, r.raw_title, r.filename) ASC`;
+    
+    return db.query(queryStr).all(...params) as any[];
   } catch (e) {
     console.error("getMoviesForUser error:", e);
     return [];
   }
 }
 
-export function getTvShowsForUser(userId: number) {
+export function getTvShowsForUser(userId: number, accountId?: number) {
   if (!db) return [];
   try {
-    return db
-      .query(
-        `SELECT
+    let q1 = `SELECT
            m.tmdb_id,
            m.title AS show_title,
            m.poster_url,
@@ -920,12 +922,9 @@ export function getTvShowsForUser(userId: number) {
          FROM media m
          JOIN remote_list_cache r ON r.tmdb_id = m.tmdb_id
          JOIN user_accounts ua ON r.account_id = ua.account_id
-         WHERE ua.user_id = ? AND r.media_type = 'tv'
-         GROUP BY m.tmdb_id
-
-         UNION ALL
-
-         SELECT
+         WHERE ua.user_id = ? AND r.media_type = 'tv'`;
+         
+    let q2 = `SELECT
            NULL AS tmdb_id,
            COALESCE(r.show_title, r.raw_title) AS show_title,
            NULL AS poster_url,
@@ -936,11 +935,18 @@ export function getTvShowsForUser(userId: number) {
            MIN(r.parsed_year) AS start_year
          FROM remote_list_cache r
          JOIN user_accounts ua ON r.account_id = ua.account_id
-         WHERE ua.user_id = ? AND r.media_type = 'tv' AND r.tmdb_id IS NULL
-         GROUP BY LOWER(COALESCE(r.show_title, r.raw_title))
-         ORDER BY show_title COLLATE NOCASE ASC`
-      )
-      .all(userId, userId) as any[];
+         WHERE ua.user_id = ? AND r.media_type = 'tv' AND r.tmdb_id IS NULL`;
+
+    const params: any[] = [userId];
+    if (accountId) {
+      q1 += ` AND r.account_id = ?`;
+      q2 += ` AND r.account_id = ?`;
+      params.push(accountId);
+    }
+    
+    const finalQuery = `${q1} GROUP BY m.tmdb_id UNION ALL ${q2} GROUP BY LOWER(COALESCE(r.show_title, r.raw_title)) ORDER BY show_title COLLATE NOCASE ASC`;
+    // We pass params twice because the placeholders exist in both halves of the UNION ALL
+    return db.query(finalQuery).all(...params, ...params) as any[];
   } catch (e) {
     console.error("getTvShowsForUser error:", e);
     return [];
@@ -999,12 +1005,10 @@ export function getTvShowDetailsForUser(userId: number, showTitle: string) {
   }
 }
 
-export function getOtherFilesForUser(userId: number) {
+export function getOtherFilesForUser(userId: number, accountId?: number) {
   if (!db) return [];
   try {
-    return db
-      .query(
-        `SELECT
+    let queryStr = `SELECT
            r.id,
            r.account_id,
            r.torrent_id,
@@ -1029,10 +1033,16 @@ export function getOtherFilesForUser(userId: number) {
          FROM remote_list_cache r
          JOIN user_accounts ua ON r.account_id = ua.account_id
          LEFT JOIN user_watched w ON w.user_id = ua.user_id AND w.account_id = r.account_id AND w.torrent_id = r.torrent_id AND w.file_id = r.file_id
-         WHERE ua.user_id = ? AND (r.media_type = 'other' OR r.media_type IS NULL)
-         ORDER BY r.filename ASC`
-      )
-      .all(userId) as any[];
+         WHERE ua.user_id = ? AND (r.media_type = 'other' OR r.media_type IS NULL)`;
+
+    const params: any[] = [userId];
+    if (accountId) {
+      queryStr += ` AND r.account_id = ?`;
+      params.push(accountId);
+    }
+    queryStr += ` ORDER BY COALESCE(r.filename, r.raw_title) ASC`;
+    
+    return db.query(queryStr).all(...params) as any[];
   } catch (e) {
     console.error("getOtherFilesForUser error:", e);
     return [];
