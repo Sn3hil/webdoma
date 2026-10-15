@@ -62,11 +62,11 @@ export function PlayerSelector({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-
+    
     toast.info("Opening player...", {
       description: "If your player didn't open, the protocol handler may not be registered on your system.",
     });
-  };
+  };3
 
   return (
     <Card>
@@ -95,7 +95,7 @@ export function PlayerSelector({
           ))}
         </div>
 
-        {value === "custom" && (
+                 {value === "custom" && (
           <div className="space-y-2">
             <label className="text-sm font-medium">
               Custom URL template

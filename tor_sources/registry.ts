@@ -4,6 +4,7 @@ import { eztv } from "./eztv";
 import { fitgirl } from "./fitgirl";
 import { limetorrents } from "./limetorrents";
 import { nyaa } from "./nyaa";
+import { sukebei } from "./sukebei";
 import { solidtorrents } from "./solidtorrents";
 import { subsplease } from "./subsplease";
 import { tpbMovies, tpbTv } from "./piratebay";
@@ -22,6 +23,7 @@ export const SOURCES: readonly Source[] = [
   tpbTv,
   x1337Tv,
   nyaa,
+  sukebei,
   subsplease,
   bittorrented,
   bitsearch,

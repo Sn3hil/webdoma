@@ -3,6 +3,7 @@ export type SourceId =
   | "yts"
   | "eztv"
   | "nyaa"
+  | "sukebei"
   | "subsplease"
   | "tpb-movies"
   | "tpb-tv"
